@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: cantonese-learning-db
+    environment:
+      POSTGRES_DB: cantonese_app
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: development_password_secure
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: cantonese-learning-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  web:
+    build: .
+    container_name: cantonese-learning-api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/code
+      - uploads-data:/uploads
+    ports:
+      - "8001:8000"
+    environment:
+      - DATABASE_URL=postgresql://admin:development_password_secure@db:5432/cantonese_app
+      - REDIS_URL=redis://redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GCP_PROJECT=${GCP_PROJECT}
+      - GCP_LOCATION=${GCP_LOCATION}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+    depends_on:
+      - db
+      - redis
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  worker:
+    build: .
+    container_name: cantonese-learning-worker
+    command: celery -A app.worker.celery_app worker --loglevel=info
+    volumes:
+      - .:/code
+      - uploads-data:/uploads
+    environment:
+      - DATABASE_URL=postgresql://admin:development_password_secure@db:5432/cantonese_app
+      - REDIS_URL=redis://redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GCP_PROJECT=${GCP_PROJECT}
+      - GCP_LOCATION=${GCP_LOCATION}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+    depends_on:
+      - redis
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  web-client:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    container_name: cantonese-learning-web
+    volumes:
+      - ../web:/code
+      - /code/node_modules
+    ports:
+      - "5173:5173"
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  pgdata:
+  uploads-data:

@@ -1,0 +1,67 @@
+# System Files
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*credentials*.json
+*key.json
+vertex_credentials.json
+
+# Local Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary & Unnecessary Images/PDFs (Root & Project)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.pdf
+Image_*.jpg
+bug_*.jpg
+Untitled*.pdf
+*.wav
+*.mp3
+*.m4a
+*.caf
+
+# Python Bytecode & Environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Android Build & IDE outputs
+.gradle/
+.idea/
+build/
+local.properties
+.navigation/
+captures/
+.externalNativeBuild/
+.cxx/
+android/app/build/
+android/build/
+*.apk
+*.aar
+*.keystore
+
+# Node/Web Build & Modules
+node_modules/
+/web/dist/
+/web/build/
+.npm
+.eslintcache
