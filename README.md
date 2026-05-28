@@ -12,13 +12,13 @@ graph TD
     classDef server fill:#8B5CF6,stroke:#6D28D9,stroke-width:2px,color:#fff;
     classDef storage fill:#3B82F6,stroke:#1D4ED8,stroke-width:2px,color:#fff;
 
-    A[Android Native App <br/> Jetpack Compose] :::client
-    B[React + Vite Web App] :::client
-    C[FastAPI Backend Server] :::server
-    D[Celery Async Task Worker] :::server
-    E[macOS Host TTS Daemon <br/> Port 9000] :::server
-    F[(PostgreSQL DB)] :::storage
-    G[(Redis Cache & Broker)] :::storage
+    A["Android Native App\nJetpack Compose"]
+    B["React + Vite Web App"]
+    C["FastAPI Backend Server"]
+    D["Celery Async Task Worker"]
+    E["macOS Host TTS Daemon\nPort 9000"]
+    F[("PostgreSQL DB")]
+    G[("Redis Cache & Broker")]
 
     A -->|1. PDF/图片/相机录入| C
     A -->|4. 获取课程/多语配音/参与测验| C
@@ -28,6 +28,10 @@ graph TD
     D -->|请求 MacBook 离线语音合成| E
     D -->|存储关系数据| F
     C -->|读取课程与学习统计| F
+
+    class A,B client
+    class C,D,E server
+    class F,G storage
 ```
 
 ### 📱 移动客户端 (Android Client)
