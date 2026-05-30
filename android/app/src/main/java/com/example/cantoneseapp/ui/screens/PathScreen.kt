@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -360,7 +361,45 @@ fun PathScreen(
                     CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
             } else {
+                // Compute the LazyColumn index of the first active unit
+                // (unlocked but not yet completed) so we can auto-scroll to it.
+                // Item layout: [0]=path label, then per chapter: [chapDivider, unit, unit, ...]
+                val activeUnitScrollIndex = remember(courseDetail, completedUnitIds) {
+                    var listIndex = 1 // start after the path-label header item
+                    var targetIndex = -1
+                    outer@ for (chapter in courseDetail.chapters) {
+                        listIndex++ // chapter divider
+                        val chapterUnits = chapter.lessons.flatMap { lesson ->
+                            lesson.units.map { unit -> Pair(lesson, unit) }
+                        }
+                        for ((_, unit) in chapterUnits) {
+                            val flatIdx = flatTextbookUnits.indexOfFirst { it.second.id == unit.id }
+                            val isCompleted = completedUnitIds.contains(unit.id)
+                            val isUnlocked = flatIdx == 0 || isCompleted ||
+                                (flatIdx > 0 && completedUnitIds.contains(flatTextbookUnits[flatIdx - 1].second.id))
+                            if (isUnlocked && !isCompleted) {
+                                targetIndex = listIndex
+                                break@outer
+                            }
+                            listIndex++
+                        }
+                    }
+                    targetIndex
+                }
+
+                val pathListState = rememberLazyListState()
+
+                LaunchedEffect(activeUnitScrollIndex) {
+                    if (activeUnitScrollIndex >= 0) {
+                        pathListState.animateScrollToItem(
+                            index = activeUnitScrollIndex,
+                            scrollOffset = -80 // slight offset so unit isn't flush against top
+                        )
+                    }
+                }
+
                 LazyColumn(
+                    state = pathListState,
                     modifier = Modifier
                         .fillMaxSize()
                         .weight(1f),
