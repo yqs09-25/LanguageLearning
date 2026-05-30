@@ -3,7 +3,7 @@ import uuid
 import logging
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from app.models import Unit, Vocabulary, Lesson, Chapter
+from app.models import Unit, Vocabulary, Lesson, Chapter, Quiz, QuizQuestion
 from app.core.tts import synthesize_cantonese_text
 
 logger = logging.getLogger("quiz_compiler")
@@ -27,7 +27,77 @@ EMOJI_DICT = {
     "點心": "🥟", "点心": "🥟"
 }
 
-def compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
+def get_or_compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
+    """
+    Returns cached quiz questions from the DB if they exist, otherwise generates
+    a fresh randomized set, persists it, and returns it.
+    Cache is invalidated (rows deleted) when the user completes the unit with 100%.
+    """
+    # --- Cache HIT: return existing rows serialized as dicts ---
+    if unit.quizzes:
+        result = []
+        for quiz_row in sorted(unit.quizzes, key=lambda q: q.title):
+            questions = [
+                {
+                    "id": q.id,
+                    "type": q.type,
+                    "prompt": q.prompt,
+                    "prompt_audio_url": q.prompt_audio_url,
+                    "options": q.options,
+                    "correct_answer": q.correct_answer,
+                    "correct_answer_list": q.correct_answer_list,
+                    "explanation": q.explanation,
+                }
+                for q in quiz_row.questions
+            ]
+            result.append({
+                "id": quiz_row.id,
+                "title": quiz_row.title,
+                "xp_reward": quiz_row.xp_reward,
+                "questions": questions,
+            })
+        logger.info(f"Quiz cache HIT for unit {unit.id} ({len(result)} quizzes)")
+        return result
+
+    # --- Cache MISS: generate, persist, and return ---
+    logger.info(f"Quiz cache MISS for unit {unit.id} — generating fresh quiz set")
+    generated = _compile_quizzes_for_unit(db, unit)
+    _persist_quizzes(db, unit, generated)
+    return generated
+
+
+def _persist_quizzes(db: Session, unit: Unit, quiz_dicts: List[Dict[str, Any]]) -> None:
+    """Persist generated quiz dicts as Quiz + QuizQuestion ORM rows."""
+    try:
+        for qdict in quiz_dicts:
+            quiz_row = Quiz(
+                id=qdict["id"],
+                unit_id=unit.id,
+                title=qdict["title"],
+                xp_reward=qdict["xp_reward"],
+            )
+            db.add(quiz_row)
+            for q in qdict["questions"]:
+                question_row = QuizQuestion(
+                    id=q["id"],
+                    quiz_id=quiz_row.id,
+                    type=q["type"],
+                    prompt=q["prompt"],
+                    prompt_audio_url=q.get("prompt_audio_url"),
+                    options=q.get("options"),
+                    correct_answer=q["correct_answer"],
+                    correct_answer_list=q.get("correct_answer_list"),
+                    explanation=q.get("explanation"),
+                )
+                db.add(question_row)
+        db.commit()
+        logger.info(f"Persisted {len(quiz_dicts)} quiz(zes) for unit {unit.id}")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to persist quizzes for unit {unit.id}: {e}")
+
+
+def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
     """
     Dynamically compiles a list of shufflable, highly engaging Quizzes for the given unit.
     Each Quiz contains a balanced selection of Duolingo-styled QuizQuestions:
@@ -308,3 +378,7 @@ def compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
             "questions": questions
         }
     ]
+
+
+# Keep old name as an alias so any other callers don't break
+compile_quizzes_for_unit = get_or_compile_quizzes_for_unit

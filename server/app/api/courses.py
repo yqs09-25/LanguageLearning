@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from typing import List, Dict
 from app.database import get_db
 from app.core.tts import synthesize_cantonese_text
-from app.models import Course, Lesson, Unit, UserStats, UserProgress, Chapter, BugReport
+from app.models import Course, Lesson, Unit, UserStats, UserProgress, Chapter, BugReport, Quiz
 from app.schemas.schemas import (
     CourseBase, 
     CourseDetail, 
@@ -92,7 +92,7 @@ def get_course_detail(course_id: uuid.UUID, db: Session = Depends(get_db)):
 @router.get("/lessons/{lesson_id}", response_model=LessonDetail)
 def get_lesson_detail(lesson_id: uuid.UUID, db: Session = Depends(get_db)):
     """Fetch vocabulary, grammar notes, and dynamically compiled quizzes within a lesson."""
-    from app.core.quiz_compiler import compile_quizzes_for_unit
+    from app.core.quiz_compiler import get_or_compile_quizzes_for_unit
 
     lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
     if not lesson:
@@ -102,7 +102,7 @@ def get_lesson_detail(lesson_id: uuid.UUID, db: Session = Depends(get_db)):
     unit_details = []
     for unit in sorted(lesson.units, key=lambda u: u.sequence_order):
         # Compile fresh, randomized quizzes dynamically from the unit's vocabulary
-        dynamic_quizzes = compile_quizzes_for_unit(db, unit)
+        dynamic_quizzes = get_or_compile_quizzes_for_unit(db, unit)
 
         unit_details.append({
             "id": unit.id,
@@ -249,6 +249,9 @@ def complete_unit(unit_id: uuid.UUID, db: Session = Depends(get_db)):
             xp_gained = 10
         else:
             xp_gained = 2  # Repeat unit reward
+
+    # Invalidate quiz cache so next load generates a fresh randomized set
+    db.query(Quiz).filter(Quiz.unit_id == unit_id).delete()
             
     # 3. Update User Streak and XP
     stats = db.query(UserStats).filter(UserStats.user_id == DEFAULT_USER_ID).first()
