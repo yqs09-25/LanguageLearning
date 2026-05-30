@@ -258,7 +258,7 @@ def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
         if len(distractor_pool) < 3:
             distractor_pool = ["我要", "多谢", "唔该"]
         distractor_chips = random.sample(distractor_pool, min(3, len(distractor_pool)))
-        options_chips = list(dict.fromkeys(list(chips) + distractor_chips))
+        options_chips = list(chips) + distractor_chips
         random.shuffle(options_chips)
         return {
             "id": uuid.uuid4(),
@@ -277,7 +277,7 @@ def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
         if len(distractor_pool) < 3:
             distractor_pool = ["我要", "多谢", "唔该"]
         distractor_chips = random.sample(distractor_pool, min(3, len(distractor_pool)))
-        options_chips = list(dict.fromkeys(list(chips) + distractor_chips))
+        options_chips = list(chips) + distractor_chips
         random.shuffle(options_chips)
         sentence_audio = synthesize_cantonese_text(target.usage_example_cantonese)
         return {
