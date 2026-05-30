@@ -135,7 +135,6 @@ def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
     if not all_vocab:
         all_vocab = unit_vocab[:]
 
-    # Filter out duplicate characters in distractor pool
     seen_chars = set()
     pool_vocab = []
     for v in all_vocab:
@@ -143,14 +142,14 @@ def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
             seen_chars.add(v.character)
             pool_vocab.append(v)
             
-    # Ensure we always have at least 10 items in the pool
     if len(pool_vocab) < 10:
         pool_vocab = pool_vocab + unit_vocab
         
     questions = []
     
     # ----------------------------------------------------
-    # QUESTION 1: MATCHING (Pairs up to 5 active vocab characters vs Mandarin)
+    # QUESTION 1: MATCHING — force ALL keys to [AUDIO]: so the learner
+    # must rely on hearing the Cantonese pronunciation, not reading the character.
     # ----------------------------------------------------
     matching_size = min(5, len(unit_vocab))
     if matching_size >= 2:
@@ -158,68 +157,59 @@ def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
         pairs_str = []
         options_dict = {}
         for target in matching_targets:
-            # Randomly decide whether to use standard text matching or listening matching (audio speaker card)
-            is_audio = random.choice([True, False])
-            left_key = f"[AUDIO]:{target.character}" if is_audio else target.character
+            left_key = f"[AUDIO]:{target.character}"  # always audio — characters are shared with Mandarin
             pairs_str.append(f"{left_key}:{target.definition_mandarin}")
             options_dict[left_key] = target.definition_mandarin
             
         questions.append({
             "id": uuid.uuid4(),
             "type": "matching",
-            "prompt": "连线正确的词汇:",
+            "prompt": "听音频，连线正确的国语释义:",
             "prompt_audio_url": None,
             "options": options_dict,
             "correct_answer": ",".join(pairs_str),
             "correct_answer_list": None,
-            "explanation": "匹配左右两边的粤语字词和国语释义。"
+            "explanation": "聆听粤语发音，将词汇与对应的国语释义相连。"
         })
 
     # ----------------------------------------------------
-    # QUESTION 2: IMAGE CHOICE (Pick vocab that has emoji)
+    # QUESTION 2: IMAGE CHOICE — cap at 1 (emoji pool is limited, fun bonus only)
     # ----------------------------------------------------
     image_targets = [v for v in unit_vocab if v.character in EMOJI_DICT or v.definition_mandarin in EMOJI_DICT]
     emoji_pool = [v for v in pool_vocab if v.character in EMOJI_DICT or v.definition_mandarin in EMOJI_DICT]
     
     if image_targets and len(emoji_pool) >= 4:
-        image_count = min(2, len(image_targets))
-        selected_image_targets = random.sample(image_targets, image_count)
-        
-        for target in selected_image_targets:
-            # Distractors must also map to unique emojis for a beautiful 2x2 grid of distinct images
-            distractors = [v for v in emoji_pool if v.character != target.character]
-            if len(distractors) >= 3:
-                distractor_sample = random.sample(distractors, 3)
-            else:
-                distractor_sample = random.sample([v for v in pool_vocab if v.character != target.character], 3)
-                
-            choices = [target.character] + [d.character for d in distractor_sample]
-            choices = list(dict.fromkeys(choices))[:4]
-            random.shuffle(choices)
+        target = random.choice(image_targets)
+        distractors = [v for v in emoji_pool if v.character != target.character]
+        if len(distractors) >= 3:
+            distractor_sample = random.sample(distractors, 3)
+        else:
+            distractor_sample = random.sample([v for v in pool_vocab if v.character != target.character], 3)
             
-            # Pre-cached / Synthesized audio for target word
-            audio_url = target.audio_url
-            if not audio_url and target.character:
-                audio_url = synthesize_cantonese_text(target.character)
-                
-            questions.append({
-                "id": uuid.uuid4(),
-                "type": "image_choice",
-                "prompt": f"{target.character} ({target.definition_mandarin})",
-                "prompt_audio_url": audio_url,
-                "options": choices,
-                "correct_answer": target.character,
-                "correct_answer_list": None,
-                "explanation": f"“{target.character}”的国语意思是“{target.definition_mandarin}”。"
-            })
+        choices = [target.character] + [d.character for d in distractor_sample]
+        choices = list(dict.fromkeys(choices))[:4]
+        random.shuffle(choices)
+        
+        audio_url = target.audio_url
+        if not audio_url and target.character:
+            audio_url = synthesize_cantonese_text(target.character)
+            
+        questions.append({
+            "id": uuid.uuid4(),
+            "type": "image_choice",
+            "prompt": f"{target.character} ({target.definition_mandarin})",
+            "prompt_audio_url": audio_url,
+            "options": choices,
+            "correct_answer": target.character,
+            "correct_answer_list": None,
+            "explanation": f"\"{target.character}\"的国语意思是\"{target.definition_mandarin}\"。"
+        })
 
     # ----------------------------------------------------
-    # QUESTION 3: DIALOGUE CHOICE (Bear chat bubble)
+    # QUESTION 3: DIALOGUE CHOICE — 1 question (jyutping pronunciation pick)
     # ----------------------------------------------------
-    dialogue_count = min(2, len(unit_vocab))
-    selected_dialogue_targets = random.sample(unit_vocab, dialogue_count)
-    
-    for target in selected_dialogue_targets:
+    if unit_vocab:
+        target = random.choice(unit_vocab)
         correct_opt = f"{target.jyutping} {target.character}" if target.jyutping else target.character
         
         distractors = [v for v in pool_vocab if v.character != target.character]
@@ -241,81 +231,87 @@ def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
         questions.append({
             "id": uuid.uuid4(),
             "type": "dialogue_choice",
-            "prompt": f"请问“{target.definition_mandarin}”用粤语怎么说？",
+            "prompt": f"请问\"{target.definition_mandarin}\"用粤语怎么说？",
             "prompt_audio_url": None,
             "options": choices,
             "correct_answer": correct_opt,
             "correct_answer_list": None,
-            "explanation": f"“{target.character}”读作“{target.jyutping}”，意思是“{target.definition_mandarin}”。"
+            "explanation": f"\"{target.character}\"读作\"{target.jyutping}\"，意思是\"{target.definition_mandarin}\"。"
         })
 
     # ----------------------------------------------------
-    # QUESTIONS 4 & 5: SENTENCE BUILDERS & LISTENING SENTENCE BUILDERS
+    # QUESTIONS 4–6: SENTENCE BUILDERS (up to 3)
     # ----------------------------------------------------
     sentence_targets = [v for v in unit_vocab if v.usage_example_cantonese and v.usage_example_cantonese_chips]
     if not sentence_targets:
         sentence_targets = [v for v in unit_vocab if v.usage_example_cantonese]
-        
-    if sentence_targets:
-        # 1. Regular Sentence Builder
-        target_sb = random.choice(sentence_targets)
-        chips = target_sb.usage_example_cantonese_chips
-        if not chips:
-            chips = [c for c in target_sb.usage_example_cantonese]
-            
+
+    used_sentences: set = set()
+
+    def _pick_sentence_target(exclude_sentences: set):
+        candidates = [v for v in sentence_targets if v.usage_example_cantonese not in exclude_sentences]
+        return random.choice(candidates) if candidates else None
+
+    def _make_sentence_builder(target) -> dict:
+        chips = target.usage_example_cantonese_chips or list(target.usage_example_cantonese)
         distractor_pool = [v.character for v in pool_vocab if v.character not in chips]
         if len(distractor_pool) < 3:
             distractor_pool = ["我要", "多谢", "唔该"]
         distractor_chips = random.sample(distractor_pool, min(3, len(distractor_pool)))
-        
-        options_chips = list(chips) + distractor_chips
-        options_chips = list(dict.fromkeys(options_chips))
+        options_chips = list(dict.fromkeys(list(chips) + distractor_chips))
         random.shuffle(options_chips)
-        
-        questions.append({
+        return {
             "id": uuid.uuid4(),
             "type": "sentence_builder",
-            "prompt": target_sb.usage_example_mandarin or f"翻译句子: {target_sb.usage_example_cantonese}",
+            "prompt": target.usage_example_mandarin or f"翻译句子: {target.usage_example_cantonese}",
             "prompt_audio_url": None,
             "options": options_chips,
             "correct_answer": " ".join(chips),
             "correct_answer_list": chips,
-            "explanation": f"粤语句子：{target_sb.usage_example_cantonese} ({target_sb.usage_example_mandarin})"
-        })
-        
-        # 2. Listening Sentence Builder
-        # Pick another sentence target if available
-        listening_targets = [v for v in sentence_targets if v.usage_example_cantonese != target_sb.usage_example_cantonese]
-        target_lsb = random.choice(listening_targets) if listening_targets else target_sb
-        
-        listening_chips = target_lsb.usage_example_cantonese_chips
-        if not listening_chips:
-            listening_chips = [c for c in target_lsb.usage_example_cantonese]
-            
-        distractor_pool = [v.character for v in pool_vocab if v.character not in listening_chips]
+            "explanation": f"粤语句子：{target.usage_example_cantonese} ({target.usage_example_mandarin})"
+        }
+
+    def _make_listening_sentence_builder(target) -> dict:
+        chips = target.usage_example_cantonese_chips or list(target.usage_example_cantonese)
+        distractor_pool = [v.character for v in pool_vocab if v.character not in chips]
         if len(distractor_pool) < 3:
             distractor_pool = ["我要", "多谢", "唔该"]
         distractor_chips = random.sample(distractor_pool, min(3, len(distractor_pool)))
-        
-        options_chips = list(listening_chips) + distractor_chips
-        options_chips = list(dict.fromkeys(options_chips))
+        options_chips = list(dict.fromkeys(list(chips) + distractor_chips))
         random.shuffle(options_chips)
-        
-        # Generate sentence audio path (hitting cache instantly since synthesized at ingestion)
-        sentence_audio = synthesize_cantonese_text(target_lsb.usage_example_cantonese)
-        
-        questions.append({
+        sentence_audio = synthesize_cantonese_text(target.usage_example_cantonese)
+        return {
             "id": uuid.uuid4(),
             "type": "listening_sentence_builder",
-            "prompt": target_lsb.usage_example_mandarin or "听写粤语句子",
+            "prompt": target.usage_example_mandarin or "听写粤语句子",
             "prompt_audio_url": sentence_audio,
             "options": options_chips,
-            "correct_answer": " ".join(listening_chips),
-            "correct_answer_list": listening_chips,
-            "explanation": f"听到的句子是：{target_lsb.usage_example_cantonese} ({target_lsb.usage_example_mandarin})"
-        })
+            "correct_answer": " ".join(chips),
+            "correct_answer_list": chips,
+            "explanation": f"听到的句子是：{target.usage_example_cantonese} ({target.usage_example_mandarin})"
+        }
 
-    # Pad to at least 10 questions using standard multiple choice if we're short
+    for _ in range(3):
+        t = _pick_sentence_target(used_sentences)
+        if not t:
+            break
+        questions.append(_make_sentence_builder(t))
+        used_sentences.add(t.usage_example_cantonese)
+
+    used_listening: set = set()
+    for _ in range(3):
+        t = _pick_sentence_target(used_listening)
+        if not t:
+            candidates = sentence_targets
+            t = random.choice(candidates) if candidates else None
+        if not t:
+            break
+        questions.append(_make_listening_sentence_builder(t))
+        used_listening.add(t.usage_example_cantonese)
+
+    # ----------------------------------------------------
+    # PAD TO 10: exclusively with listening multiple-choice
+    # ----------------------------------------------------
     while len(questions) < 10 and len(unit_vocab) > 0:
         target = random.choice(unit_vocab)
         correct_opt = target.definition_mandarin
@@ -331,19 +327,14 @@ def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
         choices = choices[:4]
         random.shuffle(choices)
         
-        # Randomly choose between standard written multiple choice or listening multiple choice
-        is_listening = random.choice([True, False])
-        
-        # Audio URL fallback just in case
         audio_url = target.audio_url
-        if is_listening and not audio_url:
+        if not audio_url:
             try:
                 audio_url = synthesize_cantonese_text(target.character)
             except Exception as e:
                 logger.error(f"Failed to synthesize audio for {target.character}: {e}")
-                is_listening = False
-                
-        if is_listening and audio_url:
+
+        if audio_url:
             questions.append({
                 "id": uuid.uuid4(),
                 "type": "listening",
@@ -352,21 +343,20 @@ def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
                 "options": choices,
                 "correct_answer": correct_opt,
                 "correct_answer_list": None,
-                "explanation": f"“{target.character}”的国语意思是“{target.definition_mandarin}”。"
+                "explanation": f"\"{target.character}\"的国语意思是\"{target.definition_mandarin}\"。"
             })
         else:
             questions.append({
                 "id": uuid.uuid4(),
                 "type": "multiple_choice",
                 "prompt": f"词汇“{target.character}”的国语翻译是什么？",
-                "prompt_audio_url": audio_url,
+                "prompt_audio_url": None,
                 "options": choices,
                 "correct_answer": correct_opt,
                 "correct_answer_list": None,
                 "explanation": f"“{target.character}”的国语意思是“{target.definition_mandarin}”。"
             })
         
-    # Shuffle the entire questions deck to make it infinitely replayable and interesting, then slice to exactly 10
     random.shuffle(questions)
     questions = questions[:10]
         
