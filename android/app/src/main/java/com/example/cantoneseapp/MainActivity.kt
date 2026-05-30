@@ -411,8 +411,10 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                         unit = viewModel.activeUnit,
                         onPlayAudio = { viewModel.playSound(it) },
                         onPlayTts = { viewModel.playTts(it) },
-                        onQuizComplete = { _ ->
-                            viewModel.completeActiveUnit()
+                        onQuizComplete = { isPerfect ->
+                            if (isPerfect) {
+                                viewModel.completeActiveUnit()
+                            }
                             viewModel.currentScreen = Screen.PATH
                         },
                         onExitQuiz = { viewModel.currentScreen = Screen.PATH }

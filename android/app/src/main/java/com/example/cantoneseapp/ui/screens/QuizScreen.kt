@@ -36,7 +36,7 @@ fun QuizScreen(
     unit: UnitDetail?,
     onPlayAudio: (String?) -> Unit,
     onPlayTts: (String) -> Unit,
-    onQuizComplete: (Int) -> Unit,
+    onQuizComplete: (Boolean) -> Unit,
     onExitQuiz: () -> Unit
 ) {
     if (unit == null || unit.quizzes.isEmpty()) {
@@ -48,13 +48,13 @@ fun QuizScreen(
 
     var currentQuizIndex by remember(unit) { mutableStateOf(0) }
     val quiz = unit.quizzes.getOrNull(currentQuizIndex) ?: unit.quizzes.first()
-    val questions = quiz.questions
-    if (questions.isEmpty()) {
+    val baseQuestions = quiz.questions
+    if (baseQuestions.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("此测试没有问题。")
                 Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = { onQuizComplete(10) }) {
+                Button(onClick = { onQuizComplete(true) }) {
                     Text("跳过测试")
                 }
             }
@@ -62,8 +62,14 @@ fun QuizScreen(
         return
     }
 
+    // Dynamic question queue: wrong answers get re-appended to the end (Duolingo-style)
+    val questionQueue = remember(quiz) { mutableStateListOf(*baseQuestions.toTypedArray()) }
+    // Track how many have been answered correctly (for the progress bar)
+    var correctAnswerCount by remember(quiz) { mutableStateOf(0) }
+    val totalQuestions = remember(quiz) { baseQuestions.size }
+
     var currentQuestionIndex by remember(quiz) { mutableStateOf(0) }
-    val currentQuestion = questions[currentQuestionIndex]
+    val currentQuestion = questionQueue.getOrNull(currentQuestionIndex) ?: return
     
     // Parse options from Any? to List<String>
     val optionsList = remember(currentQuestion) {
@@ -185,11 +191,11 @@ fun QuizScreen(
                     )
                 }
                 
-                // Progress index showing current sub-quiz part if multiple quizzes exist
+                // Progress: show correct answers out of total original questions
                 val progressText = if (unit.quizzes.size > 1) {
-                    "测试 ${currentQuestionIndex + 1}/${questions.size} (第${currentQuizIndex + 1}/${unit.quizzes.size}节)"
+                    "$correctAnswerCount / $totalQuestions (第${currentQuizIndex + 1}/${unit.quizzes.size}节)"
                 } else {
-                    "测试 ${currentQuestionIndex + 1} / ${questions.size}"
+                    "$correctAnswerCount / $totalQuestions"
                 }
                 Text(
                     text = progressText,
@@ -200,9 +206,9 @@ fun QuizScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Progress indicator bar
+            // Progress indicator bar — advances only on correct answers
             LinearProgressIndicator(
-                progress = (currentQuestionIndex).toFloat() / questions.size,
+                progress = correctAnswerCount.toFloat() / totalQuestions.toFloat(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(6.dp)
@@ -713,17 +719,35 @@ fun QuizScreen(
                     // Premium button located directly INSIDE the bottom sheet drawer (100% mimicking Duolingo)
                     Button(
                         onClick = {
-                            // Next Question, Next Quiz (if unit has multiple quizzes), or Finish Unit
-                            if (currentQuestionIndex < questions.size - 1) {
+                            // Determine if this is the last item before mutating the queue
+                            val isLastInQueue = currentQuestionIndex >= questionQueue.size - 1
+
+                            if (!isCorrectAnswer) {
+                                // Wrong answer: re-append this question to the end of the queue
+                                questionQueue.add(currentQuestion)
+                            } else {
+                                // Correct: advance progress
+                                correctAnswerCount++
+                            }
+
+                            if (!isLastInQueue) {
+                                // More questions remain in queue
                                 currentQuestionIndex++
                                 selectedOption = null
                                 hasCheckedAnswer = false
-                            } else if (currentQuizIndex < unit.quizzes.size - 1) {
+                            } else if (isCorrectAnswer && currentQuizIndex < unit.quizzes.size - 1) {
+                                // Move to next sub-quiz section
                                 currentQuizIndex++
                                 selectedOption = null
                                 hasCheckedAnswer = false
+                            } else if (isCorrectAnswer) {
+                                // All questions answered correctly — unit complete!
+                                onQuizComplete(true)
                             } else {
-                                onQuizComplete(10)
+                                // Wrong answer was the last in queue — we just re-appended it, advance
+                                currentQuestionIndex++
+                                selectedOption = null
+                                hasCheckedAnswer = false
                             }
                         },
                         modifier = Modifier
