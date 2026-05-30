@@ -310,6 +310,69 @@ def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
         used_listening.add(t.usage_example_cantonese)
 
     # ----------------------------------------------------
+    # NEW TYPE A: LISTENING → CHOOSE CANTONESE CHARACTER
+    # Hear audio → pick the correct Cantonese character from 4 options.
+    # Tests sound-to-character recognition (reverse of current listening).
+    # Reuses the existing `listening` Android UI — no client change needed.
+    # ----------------------------------------------------
+    if len(unit_vocab) >= 2:
+        target = random.choice(unit_vocab)
+        audio_url = target.audio_url
+        if not audio_url:
+            try:
+                audio_url = synthesize_cantonese_text(target.character)
+            except Exception as e:
+                logger.error(f"Failed to synthesize for char choice: {e}")
+
+        if audio_url:
+            char_distractors = [v.character for v in pool_vocab if v.character != target.character]
+            if len(char_distractors) < 3:
+                char_distractors = ["茶", "水", "飯"]
+            char_distractor_sample = random.sample(char_distractors, min(3, len(char_distractors)))
+            char_choices = [target.character] + char_distractor_sample
+            char_choices = list(dict.fromkeys(char_choices))[:4]
+            random.shuffle(char_choices)
+
+            questions.append({
+                "id": uuid.uuid4(),
+                "type": "listening",
+                "prompt": "听音频，选择你听到的粤语字词:",
+                "prompt_audio_url": audio_url,
+                "options": char_choices,
+                "correct_answer": target.character,
+                "correct_answer_list": None,
+                "explanation": f"你听到的是\"{target.character}\"，读作\"{target.jyutping}\"。"
+            })
+
+    # ----------------------------------------------------
+    # NEW TYPE B: LISTENING → MATCH JYUTPING ROMANIZATION
+    # Multiple audio buttons (Cantonese words) matched to their jyutping.
+    # Tests sound-to-romanization recognition — can you write what you hear?
+    # Reuses the existing `matching` Android UI with jyutping as right-side values.
+    # ----------------------------------------------------
+    jyutping_vocab = [v for v in unit_vocab if v.jyutping]
+    jyutping_size = min(4, len(jyutping_vocab))
+    if jyutping_size >= 2:
+        jyutping_targets = random.sample(jyutping_vocab, jyutping_size)
+        jyut_pairs_str = []
+        jyut_options_dict = {}
+        for v in jyutping_targets:
+            left_key = f"[AUDIO]:{v.character}"
+            jyut_pairs_str.append(f"{left_key}:{v.jyutping}")
+            jyut_options_dict[left_key] = v.jyutping
+
+        questions.append({
+            "id": uuid.uuid4(),
+            "type": "matching",
+            "prompt": "听音频，连线对应的粤语拼音:",
+            "prompt_audio_url": None,
+            "options": jyut_options_dict,
+            "correct_answer": ",".join(jyut_pairs_str),
+            "correct_answer_list": None,
+            "explanation": "聆听粤语发音，将每个词汇与其粤拼（Jyutping）相连。"
+        })
+
+    # ----------------------------------------------------
     # PAD TO 10: exclusively with listening multiple-choice
     # ----------------------------------------------------
     while len(questions) < 10 and len(unit_vocab) > 0:
