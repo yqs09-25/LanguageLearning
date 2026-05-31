@@ -13,7 +13,8 @@ import {
   ChevronRight, 
   Sparkles,
   CheckCircle,
-  AlertTriangle
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
 import type { Course, CourseDetail, LessonDetail, Lesson, UserStats, QuizQuestion } from './types';
 
@@ -199,6 +200,31 @@ export default function App() {
     }, 3000);
   };
 
+  const deleteCourse = async (courseId: string) => {
+    if (!window.confirm("确定要删除该课程吗？这将永久删除所有相关的章节、单词、测试及您的学习进度。")) {
+      return;
+    }
+    setIsLoading(true);
+    try {
+      await axios.delete(`${API_BASE}/courses/${courseId}`);
+      // Refresh list
+      const coursesRes = await axios.get(`${API_BASE}/courses`);
+      setCourses(coursesRes.data);
+      if (coursesRes.data.length > 0) {
+        loadCourseDetail(coursesRes.data[0].id);
+      } else {
+        setCurrentCourseDetail(null);
+        setActiveLesson(null);
+      }
+      alert("课程删除成功！");
+    } catch (err) {
+      console.error("Failed to delete course", err);
+      alert("删除课程失败，请重试。");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Option parsing helper for Quiz questions
   const getOptionsList = (question: QuizQuestion): string[] => {
     const raw = question.options;
@@ -273,12 +299,40 @@ export default function App() {
         
         {/* Top Header Stats Dashboard */}
         <header className="h-20 border-b border-[#27272a] bg-[#101014] flex items-center justify-between px-8 select-none">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <Sparkles className="h-5 w-5 text-[#10b981]" />
-            <span className="font-bold text-sm text-[#a1a1aa]">当前课程:</span>
-            <span className="font-extrabold text-sm text-white bg-[#18181b] px-3 py-1.5 rounded-xl border border-[#27272a]">
-              {currentCourseDetail?.name || '未选定课程'}
-            </span>
+            <span className="font-bold text-sm text-[#a1a1aa] whitespace-nowrap">当前课程:</span>
+            {courses.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <select
+                  value={currentCourseDetail?.id || ''}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    if (selectedId) loadCourseDetail(selectedId);
+                  }}
+                  className="font-extrabold text-sm text-white bg-[#18181b] px-3 py-1.5 rounded-xl border border-[#27272a] focus:outline-none focus:border-[#10b981] cursor-pointer"
+                >
+                  {courses.map(course => (
+                    <option key={course.id} value={course.id} className="bg-[#101014]">
+                      {course.name}
+                    </option>
+                  ))}
+                </select>
+                {currentCourseDetail && (
+                  <button
+                    onClick={() => deleteCourse(currentCourseDetail.id)}
+                    className="p-1.5 text-[#ef4444] hover:text-[#ef4444]/80 hover:bg-[#ef4444]/10 rounded-xl transition-colors border border-transparent hover:border-[#ef4444]/20"
+                    title="删除当前课程"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <span className="font-extrabold text-sm text-[#a1a1aa] bg-[#18181b] px-3 py-1.5 rounded-xl border border-[#27272a]">
+                无可用课程
+              </span>
+            )}
           </div>
 
           {/* Streak & XP crowns */}

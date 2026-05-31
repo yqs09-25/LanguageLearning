@@ -89,6 +89,22 @@ def get_course_detail(course_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Course not found")
     return course
 
+@router.delete("/{course_id}")
+def delete_course(course_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Delete a course and all its associated chapters, lessons, units, vocabulary, and progress."""
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    try:
+        db.delete(course)
+        db.commit()
+        logger.info(f"Successfully deleted course {course_id}")
+        return {"status": "success", "detail": f"Course '{course.name}' deleted successfully."}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to delete course {course_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error deleting course: {str(e)}")
+
 @router.get("/lessons/{lesson_id}", response_model=LessonDetail)
 def get_lesson_detail(lesson_id: uuid.UUID, db: Session = Depends(get_db)):
     """Fetch vocabulary, grammar notes, and dynamically compiled quizzes within a lesson."""
