@@ -345,10 +345,10 @@ def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
             })
 
     # ----------------------------------------------------
-    # NEW TYPE B: LISTENING → MATCH JYUTPING ROMANIZATION
-    # Multiple audio buttons (Cantonese words) matched to their jyutping.
-    # Tests sound-to-romanization recognition — can you write what you hear?
-    # Reuses the existing `matching` Android UI with jyutping as right-side values.
+    # NEW TYPE B: LISTENING → MATCH CANTONESE CHARACTER WITH JYUTPING
+    # Multiple audio buttons matched to their Cantonese character and jyutping.
+    # Tests sound-to-character-and-pronunciation recognition.
+    # Reuses the existing `matching` Android UI.
     # ----------------------------------------------------
     jyutping_vocab = [v for v in unit_vocab if v.jyutping]
     jyutping_size = min(4, len(jyutping_vocab))
@@ -358,18 +358,19 @@ def _compile_quizzes_for_unit(db: Session, unit: Unit) -> List[Dict[str, Any]]:
         jyut_options_dict = {}
         for v in jyutping_targets:
             left_key = f"[AUDIO]:{v.character}"
-            jyut_pairs_str.append(f"{left_key}:{v.jyutping}")
-            jyut_options_dict[left_key] = v.jyutping
+            right_val = f"{v.character} ({v.jyutping})"
+            jyut_pairs_str.append(f"{left_key}:{right_val}")
+            jyut_options_dict[left_key] = right_val
 
         questions.append({
             "id": uuid.uuid4(),
             "type": "matching",
-            "prompt": "听音频，连线对应的粤语拼音:",
+            "prompt": "听音频，连线对应的粤语字词和拼音:",
             "prompt_audio_url": None,
             "options": jyut_options_dict,
             "correct_answer": ",".join(jyut_pairs_str),
             "correct_answer_list": None,
-            "explanation": "聆听粤语发音，将每个词汇与其粤拼（Jyutping）相连。"
+            "explanation": "聆听粤语发音，将每个词汇与其对应的粤语字词及粤拼相连。"
         })
 
     # ----------------------------------------------------
