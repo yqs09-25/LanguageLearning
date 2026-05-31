@@ -9,7 +9,8 @@ data class Course(
     val description: String?,
     @SerializedName("source_lang") val sourceLang: String,
     @SerializedName("target_lang") val targetLang: String,
-    @SerializedName("created_at") val createdAt: String
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("cover_url") val coverUrl: String? = null
 )
 
 data class CourseDetail(
@@ -18,7 +19,8 @@ data class CourseDetail(
     val description: String?,
     @SerializedName("source_lang") val sourceLang: String,
     @SerializedName("target_lang") val targetLang: String,
-    val chapters: List<ChapterDetail>
+    val chapters: List<ChapterDetail>,
+    @SerializedName("cover_url") val coverUrl: String? = null
 )
 
 data class ChapterDetail(
@@ -149,7 +151,8 @@ data class EnrolledCourse(
     @SerializedName("source_lang") val sourceLang: String,
     @SerializedName("target_lang") val targetLang: String,
     @SerializedName("total_units") val totalUnits: Int,
-    @SerializedName("completed_units") val completedUnits: Int
+    @SerializedName("completed_units") val completedUnits: Int,
+    @SerializedName("cover_url") val coverUrl: String? = null
 )
 
 data class GenericResponse(

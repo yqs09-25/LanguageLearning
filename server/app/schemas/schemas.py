@@ -99,6 +99,7 @@ class CourseBase(BaseModel):
     source_lang: str
     target_lang: str
     created_at: datetime
+    cover_url: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -116,6 +117,7 @@ class EnrolledCourseResponse(BaseModel):
     target_lang: str
     total_units: int
     completed_units: int
+    cover_url: Optional[str] = None
 
     class Config:
         from_attributes = True

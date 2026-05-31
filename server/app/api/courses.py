@@ -31,6 +31,9 @@ DEFAULT_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
 def list_courses(db: Session = Depends(get_db)):
     """List all available Cantonese courses in the system."""
     courses = db.query(Course).order_by(Course.created_at.desc()).all()
+    for c in courses:
+        cover_path = os.path.join(settings.UPLOAD_DIR, "covers", f"{c.id}.png")
+        c.cover_url = f"/static/covers/{c.id}.png" if os.path.exists(cover_path) else None
     return courses
 
 
@@ -50,6 +53,9 @@ def get_enrolled_courses(db: Session = Depends(get_db)):
             UserProgress.is_completed == True
         ).count()
         
+        cover_path = os.path.join(settings.UPLOAD_DIR, "covers", f"{course.id}.png")
+        cover_url = f"/static/covers/{course.id}.png" if os.path.exists(cover_path) else None
+
         result.append({
             "id": course.id,
             "name": course.name,
@@ -57,7 +63,8 @@ def get_enrolled_courses(db: Session = Depends(get_db)):
             "source_lang": course.source_lang,
             "target_lang": course.target_lang,
             "total_units": total_units,
-            "completed_units": completed_units
+            "completed_units": completed_units,
+            "cover_url": cover_url
         })
     return result
 
@@ -87,6 +94,8 @@ def get_course_detail(course_id: uuid.UUID, db: Session = Depends(get_db)):
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
+    cover_path = os.path.join(settings.UPLOAD_DIR, "covers", f"{course.id}.png")
+    course.cover_url = f"/static/covers/{course.id}.png" if os.path.exists(cover_path) else None
     return course
 
 @router.delete("/{course_id}")

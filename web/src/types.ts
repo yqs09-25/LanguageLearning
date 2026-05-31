@@ -5,6 +5,7 @@ export interface Course {
   source_lang: string;
   target_lang: string;
   created_at: string;
+  cover_url?: string;
 }
 
 export interface CourseDetail extends Course {

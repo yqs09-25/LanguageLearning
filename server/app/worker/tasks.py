@@ -8,7 +8,8 @@ from app.core.parser import (
     parse_textbook_outline,
     parse_chapter_structure,
     parse_lesson_content,
-    extract_pdf_pages
+    extract_pdf_pages,
+    extract_pdf_cover_page
 )
 from app.core.tts import synthesize_cantonese_text
 from app.models import Course, Chapter, Lesson, Unit, Vocabulary, Quiz, QuizQuestion
@@ -94,6 +95,16 @@ def ingest_textbook_task(
                 course.description = course_outline.get("course_description", course.description)
                 db.add(course)
                 db.flush()
+
+            # Try to extract the cover page
+            try:
+                covers_dir = os.path.join(settings.UPLOAD_DIR, "covers")
+                os.makedirs(covers_dir, exist_ok=True)
+                cover_path = os.path.join(covers_dir, f"{course.id}.png")
+                logger.info(f"Extracting cover page from {file_path} to {cover_path}")
+                extract_pdf_cover_page(file_path, cover_path)
+            except Exception as cover_err:
+                logger.error(f"Failed to extract cover image: {cover_err}")
 
             chapters_list = course_outline.get("chapters", [])
             total_chapters = len(chapters_list)

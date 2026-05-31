@@ -368,10 +368,19 @@ export default function App() {
               {currentCourseDetail ? (
                 <div className="w-full space-y-8">
                   {/* Course card header */}
-                  <div className="w-full bg-gradient-to-tr from-[#10b981]/10 to-[#8b5cf6]/10 border border-[#27272a] rounded-3xl p-8 relative overflow-hidden">
+                  <div className="w-full bg-gradient-to-tr from-[#10b981]/10 to-[#8b5cf6]/10 border border-[#27272a] rounded-3xl p-8 relative overflow-hidden flex flex-col md:flex-row items-center gap-6">
                     <div className="absolute -right-16 -top-16 w-48 h-48 bg-[#10b981]/5 rounded-full blur-3xl"></div>
-                    <h2 className="font-black text-2xl tracking-tight text-white mb-2">{currentCourseDetail.name}</h2>
-                    <p className="text-sm text-[#a1a1aa] leading-relaxed max-w-lg">{currentCourseDetail.description || '由您的 PDF 课本经由 AI 识别并规划而成。'}</p>
+                    {currentCourseDetail.cover_url && (
+                      <img 
+                        src={currentCourseDetail.cover_url.startsWith('http') ? currentCourseDetail.cover_url : `${AUDIO_BASE}${currentCourseDetail.cover_url}`} 
+                        alt="书籍封面" 
+                        className="w-24 h-32 object-cover rounded-xl shadow-lg border border-[#27272a] flex-shrink-0 z-10"
+                      />
+                    )}
+                    <div className="flex-1 z-10 text-center md:text-left">
+                      <h2 className="font-black text-2xl tracking-tight text-white mb-2">{currentCourseDetail.name}</h2>
+                      <p className="text-sm text-[#a1a1aa] leading-relaxed max-w-lg">{currentCourseDetail.description || '由您的 PDF 课本经由 AI 识别并规划而成。'}</p>
+                    </div>
                   </div>
 
                   {/* Chapters & Winding Lesson Nodes */}

@@ -1005,6 +1005,7 @@ fun PathScreen(
 @Composable
 fun TextbookCover(
     title: String,
+    coverUrl: String? = null,
     modifier: Modifier = Modifier
 ) {
     val hash = title.hashCode()
@@ -1021,6 +1022,10 @@ fun TextbookCover(
         else -> Color(0xFFF59E0B) // Gold Orange
     }
 
+    val fullCoverUrl = coverUrl?.let {
+        if (it.startsWith("http")) it else "${ApiClient.AUDIO_BASE_URL.removeSuffix("/")}/${it.removePrefix("/")}"
+    }
+
     Box(
         modifier = modifier
             .shadow(4.dp, RoundedCornerShape(8.dp))
@@ -1028,6 +1033,16 @@ fun TextbookCover(
             .background(Brush.verticalGradient(listOf(startColor, endColor)))
             .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
     ) {
+        if (!fullCoverUrl.isNullOrEmpty()) {
+            // Render the actual cover page image
+            coil.compose.AsyncImage(
+                model = fullCoverUrl,
+                contentDescription = "书籍封面",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+            )
+        }
+
         // Book Spine Shadow Overlay
         Box(
             modifier = Modifier
@@ -1054,40 +1069,42 @@ fun TextbookCover(
                 .background(Color.White.copy(alpha = 0.25f))
         )
 
-        // Title and book assets
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = Alignment.Start
-        ) {
-            Icon(
-                imageVector = Icons.Default.ImportContacts,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.7f),
-                modifier = Modifier.size(18.dp)
-            )
-
-            Text(
-                text = title,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                lineHeight = 15.sp
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
+        if (fullCoverUrl.isNullOrEmpty()) {
+            // Only draw placeholder text and icon if there is no cover image
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.Start
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(width = 8.dp, height = 12.dp)
-                        .background(GlowGold.copy(alpha = 0.8f))
+                Icon(
+                    imageVector = Icons.Default.ImportContacts,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.size(18.dp)
                 )
+
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 15.sp
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 8.dp, height = 12.dp)
+                            .background(GlowGold.copy(alpha = 0.8f))
+                    )
+                }
             }
         }
     }
@@ -1128,6 +1145,7 @@ fun EnrolledCourseCard(
             // Book cover representation
             TextbookCover(
                 title = course.name,
+                coverUrl = course.coverUrl,
                 modifier = Modifier.size(width = 80.dp, height = 110.dp)
             )
 

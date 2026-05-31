@@ -42,6 +42,26 @@ def extract_pdf_pages(pdf_path: str, start_page: int, end_page: int) -> bytes:
         logger.error(f"Failed to extract PDF page range {start_page}-{end_page}: {e}")
         raise e
 
+def extract_pdf_cover_page(pdf_path: str, output_image_path: str) -> bool:
+    """
+    Extracts the first page of a PDF file as a PNG image using PyMuPDF (fitz).
+    Returns True if successful, False otherwise.
+    """
+    try:
+        import fitz
+        doc = fitz.open(pdf_path)
+        if len(doc) > 0:
+            page = doc[0]
+            pix = page.get_pixmap(dpi=150)
+            pix.save(output_image_path)
+            doc.close()
+            logger.info(f"Successfully extracted PDF cover page: {output_image_path}")
+            return True
+        doc.close()
+    except Exception as e:
+        logger.error(f"Failed to extract PDF cover page: {e}")
+    return False
+
 # Unified google-genai Client Factory
 def get_genai_client() -> genai.Client:
     """
