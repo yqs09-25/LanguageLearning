@@ -65,3 +65,7 @@ node_modules/
 /web/build/
 .npm
 .eslintcache
+
+# Models & Heavy Assets
+*.onnx
+server/vits-cantonese-hf-xiaomaiiwn/

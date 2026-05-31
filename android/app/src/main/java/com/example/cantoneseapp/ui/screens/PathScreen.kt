@@ -55,6 +55,7 @@ fun PathScreen(
     uploadProgress: IngestStatusResponse?,
     isDetailMode: Boolean,
     onCourseSelect: (UUID) -> Unit,
+    onCourseDelete: ((UUID) -> Unit)? = null,
     onBackToBookshelf: () -> Unit,
     onUnitClick: (UUID, UUID) -> Unit,
     onVocabClick: (UUID, UUID) -> Unit,
@@ -81,6 +82,32 @@ fun PathScreen(
     var bugDescription by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var bugStatusMessage by remember { mutableStateOf("") }
+
+    var courseToDelete by remember { mutableStateOf<UUID?>(null) }
+
+    if (courseToDelete != null) {
+        val course = enrolledCourses.find { it.id == courseToDelete }
+        AlertDialog(
+            onDismissRequest = { courseToDelete = null },
+            title = { Text(text = "确认删除课程", fontWeight = FontWeight.Bold) },
+            text = { Text(text = "确定要删除“${course?.name}”吗？这将永久删除该课程下的所有章节、单词、测试及您的学习进度。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        courseToDelete?.let { onCourseDelete?.invoke(it) }
+                        courseToDelete = null
+                    }
+                ) {
+                    Text(text = "确认删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { courseToDelete = null }) {
+                    Text(text = "取消")
+                }
+            }
+        )
+    }
 
     val bugImagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -342,7 +369,8 @@ fun PathScreen(
                         EnrolledCourseCard(
                             course = course,
                             isSelected = isCurrentlySelected,
-                            onClick = { onCourseSelect(course.id) }
+                            onClick = { onCourseSelect(course.id) },
+                            onDeleteClick = { courseToDelete = course.id }
                         )
                     }
                 }
@@ -1069,7 +1097,8 @@ fun TextbookCover(
 fun EnrolledCourseCard(
     course: EnrolledCourse,
     isSelected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDeleteClick: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
@@ -1111,21 +1140,40 @@ fun EnrolledCourseCard(
                     .height(110.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
-                    Text(
-                        text = course.name,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = TextPrimary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "共 ${course.totalUnits} 单元",
-                        fontSize = 11.sp,
-                        color = TextSecondary
-                    )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = course.name,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = TextPrimary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "共 ${course.totalUnits} 单元",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    }
+                    if (onDeleteClick != null) {
+                        IconButton(
+                            onClick = onDeleteClick,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "删除课程",
+                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
                 }
 
                 Column {

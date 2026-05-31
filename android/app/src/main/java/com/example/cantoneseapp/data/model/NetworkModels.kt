@@ -152,4 +152,9 @@ data class EnrolledCourse(
     @SerializedName("completed_units") val completedUnits: Int
 )
 
+data class GenericResponse(
+    val status: String,
+    val detail: String
+)
+
 

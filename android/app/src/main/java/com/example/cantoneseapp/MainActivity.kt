@@ -119,6 +119,37 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    fun deleteCourse(courseId: UUID, context: android.content.Context) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                ApiClient.service.deleteCourse(courseId)
+                // Refresh list of courses
+                enrolledCourses = ApiClient.service.getEnrolledCourses()
+                courses = ApiClient.service.getCourses()
+                
+                // Reset selected course if currently selected
+                if (currentCourseDetail?.id == courseId) {
+                    currentCourseDetail = null
+                    isDetailMode = false
+                }
+                
+                // If there are other courses left, load the first one
+                val nextCourseId = enrolledCourses.firstOrNull()?.id ?: courses.firstOrNull()?.id
+                if (nextCourseId != null) {
+                    loadCourseDetail(nextCourseId)
+                }
+                
+                Toast.makeText(context, "课程删除成功", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to delete course: ${e.message}")
+                Toast.makeText(context, "删除课程失败", Toast.LENGTH_SHORT).show()
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
     fun selectCourse(courseId: UUID) {
         loadCourseDetail(courseId)
         isDetailMode = true
@@ -373,6 +404,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             uploadProgress = viewModel.uploadProgress,
                             isDetailMode = viewModel.isDetailMode,
                             onCourseSelect = { viewModel.selectCourse(it) },
+                            onCourseDelete = { viewModel.deleteCourse(it, context) },
                             onBackToBookshelf = { viewModel.isDetailMode = false },
                             onUnitClick = { unitId, lessonId -> viewModel.selectUnit(unitId, lessonId, startWithQuiz = true) },
                             onVocabClick = { unitId, lessonId -> viewModel.selectUnit(unitId, lessonId, startWithQuiz = false) },

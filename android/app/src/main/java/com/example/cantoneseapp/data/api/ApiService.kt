@@ -20,6 +20,11 @@ interface ApiService {
         @Path("course_id") courseId: UUID
     ): CourseDetail
 
+    @DELETE("courses/{course_id}")
+    suspend fun deleteCourse(
+        @Path("course_id") courseId: UUID
+    ): GenericResponse
+
     @GET("courses/lessons/{lesson_id}")
     suspend fun getLessonDetail(
         @Path("lesson_id") lessonId: UUID
