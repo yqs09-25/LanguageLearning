@@ -132,8 +132,16 @@ def get_ingestion_status(task_id: str):
     Check the current processing status of an ingestion job.
     Returns status: 'pending', 'processing', 'completed', or 'failed'.
     """
-    task_result = AsyncResult(task_id, app=celery_app)
-    state = task_result.state
+    try:
+        task_result = AsyncResult(task_id, app=celery_app)
+        state = task_result.state
+    except Exception as e:
+        logger.error(f"Error fetching Celery state for task {task_id}: {e}")
+        return {
+            "task_id": task_id,
+            "status": "failed",
+            "error": f"Failed to retrieve task state: {str(e)}"
+        }
     
     if state == "PENDING":
         return {
@@ -141,24 +149,37 @@ def get_ingestion_status(task_id: str):
             "status": "pending"
         }
     elif state == "PROGRESS":
-        # Celery custom progress metadata
-        meta = task_result.info or {}
+        try:
+            meta = task_result.info or {}
+        except Exception as e:
+            logger.error(f"Error fetching Celery progress info for task {task_id}: {e}")
+            meta = {}
         return {
             "task_id": task_id,
             "status": "processing",
-            "result": {"message": meta.get("status", "Parsing and converting content...")}
+            "result": {"message": meta.get("status", meta.get("status", "Parsing and converting content..."))}
         }
     elif state == "SUCCESS":
+        try:
+            result_val = task_result.result
+        except Exception as e:
+            logger.error(f"Error fetching Celery result for task {task_id}: {e}")
+            result_val = None
         return {
             "task_id": task_id,
             "status": "completed",
-            "result": task_result.result
+            "result": result_val
         }
     elif state == "FAILURE":
+        try:
+            error_val = str(task_result.info)
+        except Exception as e:
+            logger.error(f"Error fetching Celery failure details for task {task_id}: {e}")
+            error_val = "Task execution failed due to an internal error."
         return {
             "task_id": task_id,
             "status": "failed",
-            "error": str(task_result.info)
+            "error": error_val
         }
     else:
         # Return raw status for other states (e.g. RETRY, STARTED)
