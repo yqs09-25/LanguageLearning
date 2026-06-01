@@ -6,8 +6,10 @@ import os
 logger = logging.getLogger("courses_router")
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from app.config import settings
+from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from typing import List, Dict
+from typing import List, Dict, Optional
 from app.database import get_db
 from app.core.tts import synthesize_cantonese_text
 from app.models import Course, Lesson, Unit, UserStats, UserProgress, Chapter, BugReport, Quiz
@@ -365,8 +367,6 @@ def report_bug(
     }
 
 
-from pydantic import BaseModel
-from sqlalchemy import func
 
 class MergeChaptersRequest(BaseModel):
     master_chapter_id: uuid.UUID
@@ -454,6 +454,60 @@ def merge_chapters(
         db.rollback()
         logger.error(f"Error merging chapters: {e}")
         raise HTTPException(status_code=500, detail=f"Database error during merge: {str(e)}")
+
+
+@router.patch("/{course_id}")
+async def update_course_metadata(
+    course_id: uuid.UUID,
+    name: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    source_lang: Optional[str] = Form(None),
+    target_lang: Optional[str] = Form(None),
+    cover: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Update textbook metadata: title, description, language settings, and/or cover image.
+    All fields are optional — only provided fields are updated.
+    Cover image is stored as PNG under the static covers directory.
+    """
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    if name is not None and name.strip():
+        course.name = name.strip()
+    if description is not None:
+        course.description = description.strip() if description.strip() else None
+    if source_lang is not None and source_lang.strip():
+        course.source_lang = source_lang.strip()
+    if target_lang is not None and target_lang.strip():
+        course.target_lang = target_lang.strip()
+
+    if cover and cover.filename:
+        try:
+            from PIL import Image as PILImage
+            import io
+            covers_dir = os.path.join(settings.UPLOAD_DIR, "covers")
+            os.makedirs(covers_dir, exist_ok=True)
+            cover_path = os.path.join(covers_dir, f"{course_id}.png")
+            content = await cover.read()
+            img = PILImage.open(io.BytesIO(content)).convert("RGB")
+            img.save(cover_path, "PNG")
+            logger.info(f"Saved new cover for course {course_id} → {cover_path}")
+        except Exception as e:
+            logger.error(f"Failed to save cover for course {course_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to process cover image: {str(e)}")
+
+    try:
+        db.commit()
+        logger.info(f"Updated metadata for course {course_id}")
+        return {"status": "success", "detail": "Course metadata updated successfully"}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to commit course metadata update: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 
 
 

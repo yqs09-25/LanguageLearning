@@ -57,6 +57,7 @@ fun PathScreen(
     uploadStatus: String?,
     uploadProgress: IngestStatusResponse?,
     isDetailMode: Boolean,
+    coverCacheBusters: Map<UUID, Long> = emptyMap(),
     onCourseSelect: (UUID) -> Unit,
     onCourseDelete: ((UUID) -> Unit)? = null,
     onBackToBookshelf: () -> Unit,
@@ -66,13 +67,15 @@ fun PathScreen(
     onUploadMultiplePdfs: (List<File>, UUID?) -> Unit,
     onRefresh: () -> Unit,
     onSubmitBugReport: (String, Uri?, (String) -> Unit) -> Unit,
-    onMergeChapters: (UUID, List<UUID>, (Boolean) -> Unit) -> Unit = { _, _, _ -> }
+    onMergeChapters: (UUID, List<UUID>, (Boolean) -> Unit) -> Unit = { _, _, _ -> },
+    onUpdateCourseMetadata: (UUID, String?, String?, String?, String?, Uri?, (Boolean) -> Unit) -> Unit = { _, _, _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     var selectedGrammarNotes by remember { mutableStateOf<String?>(null) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showBugDialog by remember { mutableStateOf(false) }
     var pendingUploadCourseId by remember { mutableStateOf<UUID?>(null) }
+    var editingCourse by remember { mutableStateOf<EnrolledCourse?>(null) }
     
     var showImportOptionsSheet by remember { mutableStateOf(false) }
     var showCameraWizardDialog by remember { mutableStateOf(false) }
@@ -112,6 +115,24 @@ fun PathScreen(
             dismissButton = {
                 TextButton(onClick = { courseToDelete = null }) {
                     Text(text = "取消")
+                }
+            }
+        )
+    }
+
+    // Metadata Edit Dialog — opens when user taps the edit icon on a bookshelf card
+    editingCourse?.let { course ->
+        CourseMetadataEditDialog(
+            course = course,
+            onDismiss = { editingCourse = null },
+            onSave = { name, desc, srcLang, tgtLang, coverUri ->
+                onUpdateCourseMetadata(course.id, name, desc, srcLang, tgtLang, coverUri) { success ->
+                    if (success) {
+                        Toast.makeText(context, "✅ 教材信息已更新！", Toast.LENGTH_SHORT).show()
+                        editingCourse = null
+                    } else {
+                        Toast.makeText(context, "❌ 更新失败，请检查服务器连接。", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         )
@@ -416,7 +437,9 @@ fun PathScreen(
                             course = course,
                             isSelected = isCurrentlySelected,
                             onClick = { onCourseSelect(course.id) },
-                            onDeleteClick = { courseToDelete = course.id }
+                            onDeleteClick = { courseToDelete = course.id },
+                            onEditClick = { editingCourse = course },
+                            coverBuster = coverCacheBusters[course.id]
                         )
                     }
                 }
@@ -1351,6 +1374,7 @@ fun ProcessingBookCard(uploadStatus: String?) {
 fun TextbookCover(
     title: String,
     coverUrl: String? = null,
+    cacheBuster: Long? = null,
     modifier: Modifier = Modifier
 ) {
     val hash = title.hashCode()
@@ -1368,7 +1392,9 @@ fun TextbookCover(
     }
 
     val fullCoverUrl = coverUrl?.let {
-        if (it.startsWith("http")) it else "${ApiClient.AUDIO_BASE_URL.removeSuffix("/")}/${it.removePrefix("/")}"
+        val base = if (it.startsWith("http")) it else "${ApiClient.AUDIO_BASE_URL.removeSuffix("/")}/${it.removePrefix("/")}"
+        // Append cache-buster timestamp to force Coil to bypass disk/memory cache after cover update
+        if (cacheBuster != null) "$base?t=$cacheBuster" else base
     }
 
     Box(
@@ -1460,7 +1486,9 @@ fun EnrolledCourseCard(
     course: EnrolledCourse,
     isSelected: Boolean,
     onClick: () -> Unit,
-    onDeleteClick: (() -> Unit)? = null
+    onDeleteClick: (() -> Unit)? = null,
+    onEditClick: (() -> Unit)? = null,
+    coverBuster: Long? = null
 ) {
     Card(
         modifier = Modifier
@@ -1491,6 +1519,7 @@ fun EnrolledCourseCard(
             TextbookCover(
                 title = course.name,
                 coverUrl = course.coverUrl,
+                cacheBuster = coverBuster,
                 modifier = Modifier.size(width = 80.dp, height = 110.dp)
             )
 
@@ -1524,17 +1553,33 @@ fun EnrolledCourseCard(
                             color = TextSecondary
                         )
                     }
-                    if (onDeleteClick != null) {
-                        IconButton(
-                            onClick = onDeleteClick,
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "删除课程",
-                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
-                                modifier = Modifier.size(20.dp)
-                            )
+                    // Edit + Delete icon row
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (onEditClick != null) {
+                            IconButton(
+                                onClick = onEditClick,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "编辑教材信息",
+                                    tint = Color(0xFF60A5FA).copy(alpha = 0.9f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        if (onDeleteClick != null) {
+                            IconButton(
+                                onClick = onDeleteClick,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "删除课程",
+                                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -2055,4 +2100,314 @@ fun loadThumbnailFromUri(context: Context, uri: Uri): android.graphics.Bitmap? {
     } catch (e: Exception) {
         null
     }
+}
+
+// -------------------------------------------------------------
+// Course Metadata Edit Dialog
+// -------------------------------------------------------------
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CourseMetadataEditDialog(
+    course: EnrolledCourse,
+    onDismiss: () -> Unit,
+    onSave: (name: String?, description: String?, sourceLang: String?, targetLang: String?, coverUri: Uri?) -> Unit
+) {
+    val context = LocalContext.current
+
+    var titleText by remember { mutableStateOf(course.name) }
+    var descriptionText by remember { mutableStateOf(course.description ?: "") }
+    var sourceLangText by remember { mutableStateOf(course.sourceLang) }
+    var targetLangText by remember { mutableStateOf(course.targetLang) }
+    var selectedCoverUri by remember { mutableStateOf<Uri?>(null) }
+    var isSaving by remember { mutableStateOf(false) }
+
+    val coverPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        selectedCoverUri = uri
+    }
+
+    val langOptions = listOf("Cantonese", "Mandarin", "English", "Japanese", "Korean", "Spanish", "French")
+    var showSourceDropdown by remember { mutableStateOf(false) }
+    var showTargetDropdown by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = null,
+                    tint = Color(0xFF60A5FA),
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "编辑教材信息",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = TextPrimary
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Cover Preview + Picker
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Live cover preview
+                    Box(
+                        modifier = Modifier
+                            .size(width = 70.dp, height = 95.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .clickable { coverPickerLauncher.launch("image/*") },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (selectedCoverUri != null) {
+                            val bitmap = remember(selectedCoverUri) {
+                                loadThumbnailFromUri(context, selectedCoverUri!!)
+                            }
+                            if (bitmap != null) {
+                                androidx.compose.foundation.Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = "新封面",
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        } else {
+                            TextbookCover(
+                                title = titleText,
+                                coverUrl = course.coverUrl,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        // Overlay edit badge
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF3B82F6)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PhotoCamera,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                    }
+
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "点击封面更换图片",
+                            fontSize = 11.sp,
+                            color = Color(0xFF60A5FA)
+                        )
+                        if (selectedCoverUri != null) {
+                            Text(
+                                text = "✓ 已选择新封面",
+                                fontSize = 10.sp,
+                                color = Color(0xFF10B981),
+                                fontWeight = FontWeight.Bold
+                            )
+                        } else if (!course.coverUrl.isNullOrEmpty()) {
+                            Text(
+                                text = "当前使用课本封面图",
+                                fontSize = 10.sp,
+                                color = TextSecondary
+                            )
+                        } else {
+                            Text(
+                                text = "当前使用渐变封面",
+                                fontSize = 10.sp,
+                                color = TextSecondary
+                            )
+                        }
+                        TextButton(
+                            onClick = { coverPickerLauncher.launch("image/*") },
+                            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "从相册选择封面 →",
+                                fontSize = 11.sp,
+                                color = Color(0xFF60A5FA),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Divider(color = DividerObsidian.copy(alpha = 0.5f))
+
+                // Title field
+                OutlinedTextField(
+                    value = titleText,
+                    onValueChange = { titleText = it },
+                    label = { Text("教材标题", fontSize = 12.sp) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF3B82F6),
+                        focusedLabelColor = Color(0xFF60A5FA),
+                        cursorColor = Color(0xFF60A5FA),
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    )
+                )
+
+                // Description field
+                OutlinedTextField(
+                    value = descriptionText,
+                    onValueChange = { descriptionText = it },
+                    label = { Text("教材简介（选填）", fontSize = 12.sp) },
+                    maxLines = 3,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 72.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF3B82F6),
+                        focusedLabelColor = Color(0xFF60A5FA),
+                        cursorColor = Color(0xFF60A5FA),
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    )
+                )
+
+                // Language selectors
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Source language
+                    Box(modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = sourceLangText,
+                            onValueChange = {},
+                            label = { Text("源语言", fontSize = 11.sp) },
+                            readOnly = true,
+                            singleLine = true,
+                            trailingIcon = {
+                                Icon(Icons.Default.ArrowDropDown, null, tint = TextSecondary)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showSourceDropdown = true },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF3B82F6),
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary
+                            )
+                        )
+                        DropdownMenu(
+                            expanded = showSourceDropdown,
+                            onDismissRequest = { showSourceDropdown = false }
+                        ) {
+                            langOptions.forEach { lang ->
+                                DropdownMenuItem(
+                                    text = { Text(lang, color = TextPrimary) },
+                                    onClick = {
+                                        sourceLangText = lang
+                                        showSourceDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Target language
+                    Box(modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = targetLangText,
+                            onValueChange = {},
+                            label = { Text("目标语言", fontSize = 11.sp) },
+                            readOnly = true,
+                            singleLine = true,
+                            trailingIcon = {
+                                Icon(Icons.Default.ArrowDropDown, null, tint = TextSecondary)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showTargetDropdown = true },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF3B82F6),
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary
+                            )
+                        )
+                        DropdownMenu(
+                            expanded = showTargetDropdown,
+                            onDismissRequest = { showTargetDropdown = false }
+                        ) {
+                            langOptions.forEach { lang ->
+                                DropdownMenuItem(
+                                    text = { Text(lang, color = TextPrimary) },
+                                    onClick = {
+                                        targetLangText = lang
+                                        showTargetDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    isSaving = true
+                    onSave(
+                        titleText.trim().takeIf { it.isNotEmpty() },
+                        descriptionText.trim(),
+                        sourceLangText.trim().takeIf { it.isNotEmpty() },
+                        targetLangText.trim().takeIf { it.isNotEmpty() },
+                        selectedCoverUri
+                    )
+                },
+                enabled = !isSaving,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("保存中...", color = Color.White, fontWeight = FontWeight.Bold)
+                } else {
+                    Icon(Icons.Default.Save, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("保存修改", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isSaving
+            ) {
+                Text("取消", color = TextSecondary)
+            }
+        },
+        shape = RoundedCornerShape(16.dp),
+        containerColor = CardObsidian
+    )
 }

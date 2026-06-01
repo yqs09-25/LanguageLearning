@@ -81,6 +81,9 @@ class MainViewModel : ViewModel() {
     var activeTaskId by mutableStateOf<String?>(null)
     var uploadProgress by mutableStateOf<IngestStatusResponse?>(null)
 
+    // Cover cache busters: courseId → timestamp, bumped after a cover image is updated
+    var coverCacheBusters by mutableStateOf<Map<UUID, Long>>(emptyMap())
+
     // MediaPlayer for playing synthesized voice pronunciations
     private var mediaPlayer: MediaPlayer? = null
 
@@ -366,6 +369,47 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    fun updateCourseMetadata(
+        courseId: UUID,
+        name: String?,
+        description: String?,
+        sourceLang: String?,
+        targetLang: String?,
+        coverFile: File?,
+        onComplete: (Boolean) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val namePart = name?.toRequestBody("text/plain".toMediaTypeOrNull())
+                val descPart = description?.toRequestBody("text/plain".toMediaTypeOrNull())
+                val srcPart = sourceLang?.toRequestBody("text/plain".toMediaTypeOrNull())
+                val tgtPart = targetLang?.toRequestBody("text/plain".toMediaTypeOrNull())
+                val coverPart = coverFile?.let { f ->
+                    val requestFile = f.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                    MultipartBody.Part.createFormData("cover", f.name, requestFile)
+                }
+                val response = ApiClient.service.updateCourseMetadata(
+                    courseId, namePart, descPart, srcPart, tgtPart, coverPart
+                )
+                if (response.status == "success") {
+                    // If a cover image was uploaded, bust the Coil cache by stamping a new timestamp
+                    if (coverFile != null) {
+                        coverCacheBusters = coverCacheBusters + (courseId to System.currentTimeMillis())
+                    }
+                    // Refresh both enrolled courses and current course detail
+                    enrolledCourses = ApiClient.service.getEnrolledCourses()
+                    currentCourseDetail?.let { loadCourseDetail(it.id) }
+                    onComplete(true)
+                } else {
+                    onComplete(false)
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to update course metadata: ${e.message}")
+                onComplete(false)
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         mediaPlayer?.release()
@@ -413,6 +457,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             uploadStatus = viewModel.uploadStatus,
                             uploadProgress = viewModel.uploadProgress,
                             isDetailMode = viewModel.isDetailMode,
+                            coverCacheBusters = viewModel.coverCacheBusters,
                             onCourseSelect = { viewModel.selectCourse(it) },
                             onCourseDelete = { viewModel.deleteCourse(it, context) },
                             onBackToBookshelf = { viewModel.isDetailMode = false },
@@ -441,6 +486,23 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                                 viewModel.currentCourseDetail?.id?.let { courseId ->
                                     viewModel.mergeChapters(courseId, masterId, mergeIds, onComplete)
                                 }
+                            },
+                            onUpdateCourseMetadata = { courseId, name, desc, src, tgt, coverUri, onComplete ->
+                                val coverFile = coverUri?.let { u ->
+                                    try {
+                                        val inputStream = contentResolver.openInputStream(u)
+                                        val bytes = inputStream?.readBytes()
+                                        if (bytes != null) {
+                                            val tmp = File(context.cacheDir, "cover_${System.currentTimeMillis()}.jpg")
+                                            tmp.writeBytes(bytes)
+                                            tmp
+                                        } else null
+                                    } catch (e: Exception) {
+                                        Log.e("MainActivity", "Failed to read cover URI bytes: ${e.message}")
+                                        null
+                                    }
+                                }
+                                viewModel.updateCourseMetadata(courseId, name, desc, src, tgt, coverFile, onComplete)
                             }
                         )
                     }

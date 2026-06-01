@@ -86,6 +86,17 @@ interface ApiService {
         @Path("course_id") courseId: UUID,
         @Body payload: MergeChaptersRequest
     ): GenericResponse
+
+    @Multipart
+    @PATCH("courses/{course_id}")
+    suspend fun updateCourseMetadata(
+        @Path("course_id") courseId: UUID,
+        @Part("name") name: okhttp3.RequestBody? = null,
+        @Part("description") description: okhttp3.RequestBody? = null,
+        @Part("source_lang") sourceLang: okhttp3.RequestBody? = null,
+        @Part("target_lang") targetLang: okhttp3.RequestBody? = null,
+        @Part cover: MultipartBody.Part? = null
+    ): GenericResponse
 }
 
 
