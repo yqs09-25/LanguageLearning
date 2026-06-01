@@ -36,11 +36,13 @@ graph TD
 
 ### 📱 移动客户端 (Android Client)
 - **UI 框架**：Jetpack Compose (现代化声明式 UI)
-- **设计系统**：Obsidian 暗黑奢华主题，结合 `MintGreen` 与 `GlowGold` 微动态动画，Duolingo 式答题反馈滑出面板。
+- **设计系统**：Obsidian 暗黑奢华主题，结合 `MintGreen` 与 `GlowGold` 微动态动画，Duolingo 式答题反馈滑出面板（已针对夜间学习进行**低眩光深色反馈面板优化**）。
 - **核心功能**：
   - **教材多源录入**：支持 PDF 电子书直接导入、相册多张照片无损上传、**相机逐页拍照录入向导** (Client-side PDF 零拷贝合集)。
   - **无线一键配置**：支持 Settings 弹窗内直接更改 Host IP 地址，Retrofit 自动重构 Lazy Service，实现零布线测试。
   - **高还原连线卡片**：支持 Jyutping/中文连线及**聆听卡片连线 (仅音量喇叭)**。
+  - **教材元数据编辑器**：书架卡片新增 ✏️ **一键编辑**按钮，支持直接修改课本标题、简介、源/目标语言，并支持**相册封面自选替换**（内置 Cover 缓存戳自动刷新算法，零延迟渲染）。
+  - **极光智能复习房 (Smart Review Suite)**：基于已学单元自动解锁的极光玻璃态 HUD 控制台，支持**“闪卡速记” (Flashcard Sprint)** 以及 **“智能挑战” (Randomized Mastery Quiz)**，零代码冗余设计，一键混打温故知新。
 
 ### ⚙️ 后端系统 (FastAPI Server & Celery)
 - **Web 框架**：FastAPI (高性能异步 Python 框架)
