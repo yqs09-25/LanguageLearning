@@ -134,12 +134,12 @@ fun PathScreen(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
-            val pdfFiles = uris.mapNotNull { convertSingleImageToPdf(context, it) }
-            if (pdfFiles.isNotEmpty()) {
-                onUploadMultiplePdfs(pdfFiles, pendingUploadCourseId)
+            val rawFiles = uris.mapNotNull { getFileFromUri(context, it) }
+            if (rawFiles.isNotEmpty()) {
+                onUploadMultiplePdfs(rawFiles, pendingUploadCourseId)
                 showUploadStatusDialog = true
             } else {
-                Toast.makeText(context, "无法将照片转换为 PDF，请重试。", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "无法加载选定的照片，请重试。", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -746,13 +746,13 @@ fun PathScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val pdfFiles = capturedUris.mapNotNull { convertSingleImageToPdf(context, it) }
-                        if (pdfFiles.isNotEmpty()) {
-                            onUploadMultiplePdfs(pdfFiles, pendingUploadCourseId)
+                        val rawFiles = capturedUris.mapNotNull { getFileFromUri(context, it) }
+                        if (rawFiles.isNotEmpty()) {
+                            onUploadMultiplePdfs(rawFiles, pendingUploadCourseId)
                             showCameraWizardDialog = false
                             showUploadStatusDialog = true
                         } else {
-                            Toast.makeText(context, "无法将拍摄的照片转换为 PDF，请重试。", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "无法加载拍摄的的照片，请重试。", Toast.LENGTH_LONG).show()
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MintGreen),

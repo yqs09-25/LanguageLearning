@@ -50,6 +50,13 @@ interface ApiService {
         @Part("course_id") courseId: okhttp3.RequestBody? = null
     ): IngestUploadResponse
 
+    @Multipart
+    @POST("ingest/batch-upload")
+    suspend fun uploadTextbookBatch(
+        @Part files: List<MultipartBody.Part>,
+        @Part("course_id") courseId: okhttp3.RequestBody? = null
+    ): IngestUploadResponse
+
     @GET("ingest/status/{task_id}")
     suspend fun getIngestionStatus(
         @Path("task_id") taskId: String

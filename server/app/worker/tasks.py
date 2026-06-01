@@ -97,13 +97,16 @@ def ingest_textbook_task(
                 db.add(course)
                 db.flush()
 
-            # Try to extract the cover page
+            # Try to extract the cover page if it does not exist yet (preserving the original cover)
             try:
                 covers_dir = os.path.join(settings.UPLOAD_DIR, "covers")
                 os.makedirs(covers_dir, exist_ok=True)
                 cover_path = os.path.join(covers_dir, f"{course.id}.png")
-                logger.info(f"Extracting cover page from {file_path} to {cover_path}")
-                extract_pdf_cover_page(file_path, cover_path)
+                if not os.path.exists(cover_path):
+                    logger.info(f"Extracting cover page from {file_path} to {cover_path}")
+                    extract_pdf_cover_page(file_path, cover_path)
+                else:
+                    logger.info(f"Preserving existing course cover page at {cover_path}")
             except Exception as cover_err:
                 logger.error(f"Failed to extract cover image: {cover_err}")
 

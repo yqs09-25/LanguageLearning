@@ -276,35 +276,24 @@ class MainViewModel : ViewModel() {
     fun uploadSequentialImages(files: List<File>, courseId: UUID? = null) {
         viewModelScope.launch {
             uploadStatus = "Preparing to upload textbook pages..."
-            var activeCourseId = courseId
             try {
-                for ((index, file) in files.withIndex()) {
-                    uploadStatus = "Uploading page ${index + 1} of ${files.size}..."
-                    
-                    val requestFile = file.asRequestBody("application/pdf".toMediaTypeOrNull())
-                    val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
-                    
-                    val courseIdBody = activeCourseId?.toString()?.toRequestBody("text/plain".toMediaTypeOrNull())
-                    val response = ApiClient.service.uploadTextbook(body, courseIdBody)
-                    
-                    activeTaskId = response.taskId
-                    uploadStatus = "Page ${index + 1} uploaded! Scheduling AI analysis..."
-                    
-                    if (activeCourseId == null && response.courseId != null) {
-                        try {
-                            activeCourseId = UUID.fromString(response.courseId)
-                        } catch (e: Exception) {
-                            Log.e("MainActivity", "Failed to parse returned courseId: ${response.courseId}")
-                        }
-                    }
+                uploadStatus = "Packaging ${files.size} pages for upload..."
+                val fileParts = files.map { file ->
+                    val mimeType = if (file.name.endsWith(".pdf", ignoreCase = true)) "application/pdf" else "image/jpeg"
+                    val requestFile = file.asRequestBody(mimeType.toMediaTypeOrNull())
+                    MultipartBody.Part.createFormData("files", file.name, requestFile)
                 }
                 
-                uploadStatus = "All pages uploaded! Running background AI analysis..."
+                val courseIdBody = courseId?.toString()?.toRequestBody("text/plain".toMediaTypeOrNull())
                 
-                // Begin polling task status of the final enqueued page
-                activeTaskId?.let { taskId ->
-                    pollIngestionStatus(taskId)
-                }
+                uploadStatus = "Uploading ${files.size} pages in a single batch..."
+                val response = ApiClient.service.uploadTextbookBatch(fileParts, courseIdBody)
+                
+                activeTaskId = response.taskId
+                uploadStatus = "All pages uploaded successfully! Running background AI analysis..."
+                
+                // Begin polling task status of the enqueued batch job
+                pollIngestionStatus(response.taskId)
             } catch (e: Exception) {
                 uploadStatus = "Upload failed: ${e.message}"
             }
