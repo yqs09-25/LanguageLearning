@@ -264,7 +264,6 @@ def ingest_textbook_task(
 
     except Exception as e:
         logger.error(f"Textbook multi-stage ingestion task failed: {e}")
-        update_task_progress(self, state="FAILURE", meta={"error": str(e)})
         raise e
 
 @celery_app.task(bind=True)
@@ -400,7 +399,6 @@ def ingest_chapter_task(
             db.close()
     except Exception as e:
         logger.error(f"Chapter Ingestion failed: {e}")
-        update_task_progress(self, state="FAILURE", meta={"error": str(e)})
         raise e
 
 @celery_app.task(bind=True)
@@ -508,5 +506,4 @@ def ingest_lesson_task(
             db.close()
     except Exception as e:
         logger.error(f"Lesson Ingestion failed: {e}")
-        update_task_progress(self, state="FAILURE", meta={"error": str(e)})
         raise e

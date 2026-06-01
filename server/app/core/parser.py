@@ -24,11 +24,16 @@ def extract_pdf_pages(pdf_path: str, start_page: int, end_page: int) -> bytes:
         writer = PdfWriter()
         
         total_pages = len(reader.pages)
-        # Ensure pages are 1-indexed and within valid bounds
+        # Ensure pages are 1-indexed and clamped within valid bounds
+        if start_page > total_pages:
+            start_page = total_pages
+        if end_page > total_pages or end_page < start_page:
+            end_page = total_pages
+            
         start_idx = max(0, start_page - 1)
         end_idx = min(total_pages - 1, end_page - 1)
         
-        if start_idx > end_idx:
+        if start_idx > end_idx or total_pages == 0:
             logger.warning(f"Invalid page range {start_page}-{end_page} for total pages {total_pages}. Returning empty PDF.")
             return b""
             

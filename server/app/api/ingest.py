@@ -126,6 +126,142 @@ async def upload_textbook(
             detail=f"Failed to initiate background parsing job: {str(queue_err)}"
         )
 
+@router.post("/batch-upload", response_model=IngestUploadResponse)
+async def upload_textbook_batch(
+    files: list[UploadFile] = File(...),
+    target_lang: str = Form("Cantonese"),
+    base_lang: str = Form("Mandarin (Simplified Chinese)"),
+    target_lang_romanization: str = Form("Jyutping"),
+    experience_level: str = Form("beginner"),
+    course_id: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload multiple Cantonese textbook photos/pages in a single request.
+    The server will automatically compress, convert, and merge them into a single PDF
+    before triggering a single ingestion background job.
+    """
+    import io
+    import fitz  # PyMuPDF
+    from PIL import Image
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded.")
+
+    # 1. Validate file extensions
+    for file in files:
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in [".pdf", ".jpg", ".jpeg", ".png"]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid file format for {file.filename}. Supported formats: PDF, JPG, JPEG, PNG."
+            )
+
+    # 2. Process, compress, and merge all files into a single in-memory fitz document
+    logger.info(f"Processing batch upload of {len(files)} files...")
+    doc = fitz.open()
+    
+    try:
+        for file in files:
+            file_ext = os.path.splitext(file.filename)[1].lower()
+            file_bytes = await file.read()
+            
+            if file_ext == ".pdf":
+                # Open PDF stream and copy pages
+                src_doc = fitz.open(stream=file_bytes, filetype="pdf")
+                for page in src_doc:
+                    # Render page to optimized 120 DPI JPEG to shrink it
+                    pix = page.get_pixmap(dpi=120)
+                    img_bytes = pix.tobytes("jpeg")
+                    img_doc = fitz.open("pdf", fitz.open("jpeg", img_bytes).convert_to_pdf())
+                    doc.insert_pdf(img_doc)
+                src_doc.close()
+            else:
+                # Compress image using PIL in-memory
+                img = Image.open(io.BytesIO(file_bytes))
+                max_size = 1500
+                if max(img.size) > max_size:
+                    img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                
+                # Save as JPEG with 75% quality to keep it ultra lightweight
+                img_io = io.BytesIO()
+                img.convert('RGB').save(img_io, "JPEG", quality=75, optimize=True)
+                img_bytes = img_io.getvalue()
+                
+                # Insert into our merged fitz document
+                img_doc = fitz.open("pdf", fitz.open("jpeg", img_bytes).convert_to_pdf())
+                doc.insert_pdf(img_doc)
+    except Exception as process_err:
+        logger.error(f"Failed to process and compress batch files: {process_err}")
+        doc.close()
+        raise HTTPException(status_code=500, detail=f"Failed to process files: {str(process_err)}")
+
+    # 3. Save the merged highly-compressed PDF to disk
+    unique_filename = f"batch_{uuid.uuid4()}.pdf"
+    destination_path = os.path.join(settings.UPLOAD_DIR, "textbooks", unique_filename)
+    
+    try:
+        doc.save(destination_path)
+        doc.close()
+        size_mb = os.path.getsize(destination_path) / (1024 * 1024)
+        logger.info(f"Successfully merged and compressed batch into {destination_path} ({size_mb:.2f} MB)")
+    except Exception as save_err:
+        doc.close()
+        logger.error(f"Failed to save merged PDF to disk: {save_err}")
+        raise HTTPException(status_code=500, detail="Failed to save merged document on server.")
+
+    # 4. Create skeleton course record if enqueuing a brand new course
+    active_course_uuid = None
+    if course_id and course_id.strip():
+        try:
+            active_course_uuid = uuid.UUID(course_id.strip())
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid course_id UUID format.")
+    else:
+        try:
+            course_name = f"教材: 批量导入_{files[0].filename.split('.')[0]}"
+            new_course = Course(
+                name=course_name,
+                description="正在通过 Gemini 智能规划章节与语音..."
+            )
+            db.add(new_course)
+            db.commit()
+            db.refresh(new_course)
+            active_course_uuid = new_course.id
+            logger.info(f"Created Course skeleton in API endpoint: {course_name} (ID: {active_course_uuid})")
+        except Exception as db_err:
+            logger.error(f"Failed to create Course skeleton in database: {db_err}")
+            if os.path.exists(destination_path):
+                os.remove(destination_path)
+            raise HTTPException(status_code=500, detail=f"Failed to initialize course in database: {str(db_err)}")
+
+    # 5. Enqueue Celery Ingestion Task
+    try:
+        task = ingest_textbook_task.delay(
+            destination_path,
+            is_pdf=True,
+            target_lang=target_lang,
+            base_lang=base_lang,
+            target_lang_romanization=target_lang_romanization,
+            experience_level=experience_level,
+            course_id=str(active_course_uuid)
+        )
+        logger.info(f"Triggered batch ingestion background job: Task ID {task.id}")
+        return {
+            "task_id": task.id,
+            "status": "processing",
+            "detail": f"Batch upload of {len(files)} files successful. Unified course parsing job enqueued.",
+            "course_id": str(active_course_uuid)
+        }
+    except Exception as queue_err:
+        logger.error(f"Failed to enqueue Celery task: {queue_err}")
+        if os.path.exists(destination_path):
+            os.remove(destination_path)
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to initiate background parsing job: {str(queue_err)}"
+        )
+
 @router.get("/status/{task_id}", response_model=IngestStatusResponse)
 def get_ingestion_status(task_id: str):
     """

@@ -69,3 +69,7 @@ node_modules/
 # Models & Heavy Assets
 *.onnx
 server/vits-cantonese-hf-xiaomaiiwn/
+
+# Scratch & Temporary Folders
+server/scratch/
+scratch/
