@@ -345,6 +345,27 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    fun mergeChapters(courseId: UUID, masterChapterId: UUID, chapterIdsToMerge: List<UUID>, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val response = ApiClient.service.mergeChapters(
+                    courseId,
+                    MergeChaptersRequest(masterChapterId, chapterIdsToMerge)
+                )
+                if (response.status == "success") {
+                    loadCourseDetail(courseId)
+                    enrolledCourses = ApiClient.service.getEnrolledCourses()
+                    onComplete(true)
+                } else {
+                    onComplete(false)
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to merge chapters: ${e.message}")
+                onComplete(false)
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         mediaPlayer?.release()
@@ -415,6 +436,11 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                                     }
                                 }
                                 viewModel.submitBugReport(desc, filePart, onComplete)
+                            },
+                            onMergeChapters = { masterId, mergeIds, onComplete ->
+                                viewModel.currentCourseDetail?.id?.let { courseId ->
+                                    viewModel.mergeChapters(courseId, masterId, mergeIds, onComplete)
+                                }
                             }
                         )
                     }

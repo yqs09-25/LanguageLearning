@@ -160,4 +160,10 @@ data class GenericResponse(
     val detail: String
 )
 
+data class MergeChaptersRequest(
+    @SerializedName("master_chapter_id") val masterChapterId: UUID,
+    @SerializedName("chapter_ids_to_merge") val chapterIdsToMerge: List<UUID>
+)
+
+
 

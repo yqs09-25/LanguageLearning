@@ -9,9 +9,11 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -28,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -62,13 +65,13 @@ fun PathScreen(
     onUploadPdf: (File, UUID?) -> Unit,
     onUploadMultiplePdfs: (List<File>, UUID?) -> Unit,
     onRefresh: () -> Unit,
-    onSubmitBugReport: (String, Uri?, (String) -> Unit) -> Unit
+    onSubmitBugReport: (String, Uri?, (String) -> Unit) -> Unit,
+    onMergeChapters: (UUID, List<UUID>, (Boolean) -> Unit) -> Unit = { _, _, _ -> }
 ) {
     val context = LocalContext.current
     var selectedGrammarNotes by remember { mutableStateOf<String?>(null) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showBugDialog by remember { mutableStateOf(false) }
-    var showUploadStatusDialog by remember { mutableStateOf(false) }
     var pendingUploadCourseId by remember { mutableStateOf<UUID?>(null) }
     
     var showImportOptionsSheet by remember { mutableStateOf(false) }
@@ -82,6 +85,11 @@ fun PathScreen(
     var bugDescription by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var bugStatusMessage by remember { mutableStateOf("") }
+    var isMergeMode by remember { mutableStateOf(false) }
+    val selectedMergeChapters = remember { mutableStateListOf<UUID>() }
+    var showMergeConfirmationDialog by remember { mutableStateOf(false) }
+    var selectedMasterChapterId by remember { mutableStateOf<UUID?>(null) }
+    var isMergingProgress by remember { mutableStateOf(false) }
 
     var courseToDelete by remember { mutableStateOf<UUID?>(null) }
 
@@ -123,7 +131,7 @@ fun PathScreen(
             val file = getFileFromUri(context, it)
             if (file != null) {
                 onUploadPdf(file, pendingUploadCourseId)
-                showUploadStatusDialog = true
+                Toast.makeText(context, "📚 教材已上传，Gemini 正在后台解析...", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(context, "无法加载选定的 PDF，请重试。", Toast.LENGTH_LONG).show()
             }
@@ -137,7 +145,7 @@ fun PathScreen(
             val rawFiles = uris.mapNotNull { getFileFromUri(context, it) }
             if (rawFiles.isNotEmpty()) {
                 onUploadMultiplePdfs(rawFiles, pendingUploadCourseId)
-                showUploadStatusDialog = true
+                Toast.makeText(context, "📚 教材已上传，Gemini 正在后台解析...", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(context, "无法加载选定的照片，请重试。", Toast.LENGTH_LONG).show()
             }
@@ -163,10 +171,15 @@ fun PathScreen(
         cameraLauncher.launch(uri)
     }
 
-    // Automatically trigger upload status dialog if uploading starts
+    // Track when processing completes to show a toast (non-blocking)
+    var lastUploadStatus by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(uploadStatus) {
-        if (!uploadStatus.isNullOrEmpty()) {
-            showUploadStatusDialog = true
+        val prev = lastUploadStatus
+        lastUploadStatus = uploadStatus
+        if (prev != null && uploadStatus != null && uploadStatus.contains("Successfully")) {
+            Toast.makeText(context, "✅ AI 解析完成！新教材已加入书架。", Toast.LENGTH_LONG).show()
+        } else if (prev != null && uploadStatus != null && uploadStatus.contains("failed")) {
+            Toast.makeText(context, "❌ AI 解析失败，请检查服务器。", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -274,6 +287,21 @@ fun PathScreen(
                 if (isDetailMode) {
                     IconButton(
                         onClick = {
+                            isMergeMode = !isMergeMode
+                            selectedMergeChapters.clear()
+                        },
+                        modifier = Modifier.size(32.dp).padding(end = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isMergeMode) Icons.Default.Close else Icons.Default.CallMerge,
+                            contentDescription = "合并章节",
+                            tint = if (isMergeMode) MaterialTheme.colorScheme.error else MintGreen,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = {
                             pendingUploadCourseId = courseDetail?.id
                             showImportOptionsSheet = true
                         },
@@ -301,6 +329,17 @@ fun PathScreen(
                     )
                 }
             }
+        }
+
+        // Processing status banner — appears between top bar and content, non-blocking
+        val isActivelyProcessing = uploadProgress?.status == "processing" ||
+                (uploadStatus != null && (uploadStatus.contains("Uploading") || uploadStatus.contains("Running") || uploadStatus.contains("Structuring") || uploadStatus.contains("background")))
+        AnimatedVisibility(
+            visible = isActivelyProcessing,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            ProcessingStatusBanner(uploadStatus = uploadStatus)
         }
 
         if (!isDetailMode) {
@@ -332,7 +371,14 @@ fun PathScreen(
                     })
                 }
 
-                if (enrolledCourses.isEmpty()) {
+                // Processing placeholder card — shown while Gemini is working in background
+                if (isActivelyProcessing) {
+                    item {
+                        ProcessingBookCard(uploadStatus = uploadStatus)
+                    }
+                }
+
+                if (enrolledCourses.isEmpty() && !isActivelyProcessing) {
                     item {
                         Box(
                             modifier = Modifier
@@ -449,7 +495,16 @@ fun PathScreen(
                             ChapterDividerCard(
                                 title = chapter.title,
                                 description = chapter.description ?: "",
-                                index = chapIdx + 1
+                                index = chapIdx + 1,
+                                isMergeMode = isMergeMode,
+                                isSelected = selectedMergeChapters.contains(chapter.id),
+                                onSelectedChange = { selected ->
+                                    if (selected) {
+                                        selectedMergeChapters.add(chapter.id)
+                                    } else {
+                                        selectedMergeChapters.remove(chapter.id)
+                                    }
+                                }
                             )
                         }
 
@@ -481,6 +536,71 @@ fun PathScreen(
                                 showImportOptionsSheet = true
                             }
                         )
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = isMergeMode,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        color = CardObsidian.copy(alpha = 0.95f),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, MintGreen.copy(alpha = 0.3f)),
+                        shadowElevation = 8.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "已选择 ${selectedMergeChapters.size} 个章节",
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Text(
+                                    text = "请合并为您选择的一个主章节",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    if (selectedMergeChapters.size >= 2) {
+                                        selectedMasterChapterId = selectedMergeChapters.firstOrNull()
+                                        showMergeConfirmationDialog = true
+                                    }
+                                },
+                                enabled = selectedMergeChapters.size >= 2,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MintGreen,
+                                    disabledContainerColor = CardObsidian
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CallMerge,
+                                    contentDescription = "Merge",
+                                    tint = if (selectedMergeChapters.size >= 2) ObsidianBg else TextSecondary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "合并章节",
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selectedMergeChapters.size >= 2) ObsidianBg else TextSecondary
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -525,62 +645,6 @@ fun PathScreen(
         )
     }
 
-    // Dialog 2: Active Ingestion Upload linear progress
-    if (showUploadStatusDialog && !uploadStatus.isNullOrEmpty()) {
-        val isProcessing = uploadProgress?.status == "processing" || 
-                uploadStatus.contains("Uploading") || uploadStatus.contains("Uploaded")
-
-        AlertDialog(
-            onDismissRequest = { if (!isProcessing) showUploadStatusDialog = false },
-            confirmButton = {
-                TextButton(
-                    onClick = { showUploadStatusDialog = false },
-                    enabled = !isProcessing
-                ) {
-                    Text(
-                        text = if (isProcessing) "正在解析中..." else "返回主页",
-                        color = if (isProcessing) TextSecondary else MintGreen,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = if (isProcessing) Icons.Default.CloudUpload else Icons.Default.CloudDone,
-                        contentDescription = null,
-                        tint = if (isProcessing) MaterialTheme.colorScheme.primary else MintGreen
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "AI 课本导入管道", fontWeight = FontWeight.Bold)
-                }
-            },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = uploadStatus ?: "正在发起解析...",
-                        fontSize = 14.sp,
-                        color = TextPrimary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
-                    if (isProcessing) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        LinearProgressIndicator(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(3.dp)),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = DividerObsidian
-                        )
-                    }
-                }
-            },
-            shape = RoundedCornerShape(16.dp),
-            containerColor = CardObsidian
-        )
-    }
 
     if (showImportOptionsSheet) {
         AlertDialog(
@@ -750,7 +814,7 @@ fun PathScreen(
                         if (rawFiles.isNotEmpty()) {
                             onUploadMultiplePdfs(rawFiles, pendingUploadCourseId)
                             showCameraWizardDialog = false
-                            showUploadStatusDialog = true
+                            Toast.makeText(context, "📚 教材已上传，Gemini 正在后台解析...", Toast.LENGTH_SHORT).show()
                         } else {
                             Toast.makeText(context, "无法加载拍摄的的照片，请重试。", Toast.LENGTH_LONG).show()
                         }
@@ -995,6 +1059,287 @@ fun PathScreen(
             shape = RoundedCornerShape(16.dp),
             containerColor = CardObsidian
         )
+    }
+
+    if (showMergeConfirmationDialog && courseDetail != null) {
+        val chaptersToMerge = courseDetail.chapters.filter { selectedMergeChapters.contains(it.id) }
+        
+        AlertDialog(
+            onDismissRequest = { if (!isMergingProgress) showMergeConfirmationDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CallMerge,
+                        contentDescription = "Merge Chapters",
+                        tint = MintGreen
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = "确认合并章节", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "选中的 ${chaptersToMerge.size} 个章节中的所有课程、单词和进度将被安全合并。请选择保留哪一个章节的名称与描述（主章节）：",
+                        fontSize = 14.sp,
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    chaptersToMerge.forEach { chapter ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedMasterChapterId = chapter.id }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedMasterChapterId == chapter.id,
+                                onClick = { selectedMasterChapterId = chapter.id },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = MintGreen,
+                                    unselectedColor = TextSecondary
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = chapter.title,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary,
+                                    fontSize = 14.sp
+                                )
+                                Text(
+                                    text = "${chapter.lessons.size} 个课程",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val masterId = selectedMasterChapterId
+                        if (masterId != null) {
+                            val mergeIds = selectedMergeChapters.filter { it != masterId }
+                            isMergingProgress = true
+                            onMergeChapters(masterId, mergeIds) { success ->
+                                isMergingProgress = false
+                                if (success) {
+                                    Toast.makeText(context, "合并成功！", Toast.LENGTH_SHORT).show()
+                                    isMergeMode = false
+                                    selectedMergeChapters.clear()
+                                    showMergeConfirmationDialog = false
+                                } else {
+                                    Toast.makeText(context, "合并失败，请重试。", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    },
+                    enabled = !isMergingProgress && selectedMasterChapterId != null
+                ) {
+                    Text(
+                        text = if (isMergingProgress) "合并中..." else "确认合并",
+                        color = MintGreen,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showMergeConfirmationDialog = false },
+                    enabled = !isMergingProgress
+                ) {
+                    Text("取消", color = TextSecondary)
+                }
+            },
+            containerColor = CardObsidian,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+}
+
+// -------------------------------------------------------------
+// Processing Status Banner (non-blocking slim strip)
+// -------------------------------------------------------------
+
+@Composable
+fun ProcessingStatusBanner(uploadStatus: String?) {
+    val infiniteTransition = rememberInfiniteTransition(label = "banner_pulse")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_alpha"
+    )
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        color = Color(0xFF1A2A40).copy(alpha = 0.95f),
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, Color(0xFF3B82F6).copy(alpha = 0.5f)),
+        shadowElevation = 4.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = Color(0xFF60A5FA).copy(alpha = alpha)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Gemini 正在后台解析教材...",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF93C5FD)
+                )
+                if (!uploadStatus.isNullOrEmpty()) {
+                    Text(
+                        text = uploadStatus,
+                        fontSize = 10.sp,
+                        color = Color(0xFF64748B),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Text(
+                text = "可自由浏览",
+                fontSize = 10.sp,
+                color = Color(0xFF10B981),
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// Processing Book Placeholder Card (shimmer in bookshelf)
+// -------------------------------------------------------------
+
+@Composable
+fun ProcessingBookCard(uploadStatus: String?) {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val shimmerOffset by infiniteTransition.animateFloat(
+        initialValue = -300f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmer_offset"
+    )
+
+    val shimmerBrush = Brush.linearGradient(
+        colors = listOf(
+            Color(0xFF1E293B),
+            Color(0xFF334155).copy(alpha = 0.8f),
+            Color(0xFF475569).copy(alpha = 0.4f),
+            Color(0xFF334155).copy(alpha = 0.8f),
+            Color(0xFF1E293B)
+        ),
+        start = Offset(shimmerOffset - 200f, 0f),
+        end = Offset(shimmerOffset + 200f, 400f)
+    )
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .shadow(4.dp, shape = RoundedCornerShape(12.dp))
+            .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Shimmer "book cover" placeholder
+            Box(
+                modifier = Modifier
+                    .size(width = 80.dp, height = 110.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(shimmerBrush),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = Color(0xFF60A5FA).copy(alpha = 0.7f),
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(110.dp),
+                verticalArrangement = Arrangement.SpaceEvenly
+            ) {
+                // Title shimmer bar
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.7f)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(shimmerBrush)
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.5f)
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(shimmerBrush)
+                )
+
+                Column {
+                    Text(
+                        text = "Gemini 正在构建教材...",
+                        fontSize = 11.sp,
+                        color = Color(0xFF60A5FA),
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (!uploadStatus.isNullOrEmpty()) {
+                        Text(
+                            text = uploadStatus,
+                            fontSize = 10.sp,
+                            color = Color(0xFF64748B),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(2.dp)),
+                        color = Color(0xFF3B82F6),
+                        trackColor = Color(0xFF1E293B)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1349,36 +1694,60 @@ fun AddChapterCard(
 }
 
 @Composable
-fun ChapterDividerCard(title: String, description: String, index: Int) {
+fun ChapterDividerCard(
+    title: String, 
+    description: String, 
+    index: Int,
+    isMergeMode: Boolean = false,
+    isSelected: Boolean = false,
+    onSelectedChange: (Boolean) -> Unit = {}
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clickable(enabled = isMergeMode) { onSelectedChange(!isSelected) },
         colors = CardDefaults.cardColors(containerColor = CardObsidian),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                "章节 $index",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                title,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
-                color = TextPrimary
-            )
-            if (description.isNotEmpty()) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isMergeMode) {
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = onSelectedChange,
+                    modifier = Modifier.padding(end = 12.dp),
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = MintGreen,
+                        uncheckedColor = TextSecondary
+                    )
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "章节 $index",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    description,
-                    fontSize = 12.sp,
-                    color = TextSecondary,
-                    lineHeight = 16.sp
+                    title,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = TextPrimary
                 )
+                if (description.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        description,
+                        fontSize = 12.sp,
+                        color = TextSecondary,
+                        lineHeight = 16.sp
+                    )
+                }
             }
         }
     }
@@ -1538,6 +1907,7 @@ fun UnitShelfCard(
             }
         }
     }
+
 }
 
 // -------------------------------------------------------------

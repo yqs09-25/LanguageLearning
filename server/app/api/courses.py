@@ -365,4 +365,96 @@ def report_bug(
     }
 
 
+from pydantic import BaseModel
+from sqlalchemy import func
+
+class MergeChaptersRequest(BaseModel):
+    master_chapter_id: uuid.UUID
+    chapter_ids_to_merge: List[uuid.UUID]
+
+@router.post("/{course_id}/merge-chapters")
+def merge_chapters(
+    course_id: uuid.UUID,
+    payload: MergeChaptersRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Merge multiple chapters into a single master chapter.
+    Preserves lessons, re-sequences lessons, migrates user progress, 
+    and re-indexes remaining course chapters.
+    """
+    # 1. Verify course exists
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+        
+    # 2. Verify master_chapter exists and belongs to the course
+    master_chapter = db.query(Chapter).filter(
+        Chapter.id == payload.master_chapter_id,
+        Chapter.course_id == course_id
+    ).first()
+    if not master_chapter:
+        raise HTTPException(status_code=400, detail="Master chapter not found or does not belong to this course")
+        
+    # 3. Verify all other chapters belong to the course
+    if not payload.chapter_ids_to_merge:
+        raise HTTPException(status_code=400, detail="No chapters specified for merge")
+        
+    if payload.master_chapter_id in payload.chapter_ids_to_merge:
+        raise HTTPException(status_code=400, detail="Master chapter cannot be in the list of chapters to merge")
+        
+    secondary_chapters = db.query(Chapter).filter(
+        Chapter.id.in_(payload.chapter_ids_to_merge),
+        Chapter.course_id == course_id
+    ).all()
+    
+    if len(secondary_chapters) != len(payload.chapter_ids_to_merge):
+        raise HTTPException(status_code=400, detail="One or more chapters to merge were not found in this course")
+        
+    try:
+        # Get highest sequence order of lessons currently in master chapter
+        max_seq = db.query(func.max(Lesson.sequence_order)).filter(
+            Lesson.chapter_id == master_chapter.id
+        ).scalar() or 0
+        
+        # Sort secondary chapters according to their current sequence_order to preserve relative history
+        secondary_chapters.sort(key=lambda c: c.sequence_order)
+        
+        current_seq_offset = max_seq + 1
+        
+        for chap in secondary_chapters:
+            # Re-parent lessons using SQLAlchemy collections to avoid cascade delete-orphan issues
+            lessons = list(chap.lessons)
+            for lesson in sorted(lessons, key=lambda l: l.sequence_order):
+                chap.lessons.remove(lesson)
+                lesson.sequence_order = current_seq_offset
+                current_seq_offset += 1
+                master_chapter.lessons.append(lesson)
+                
+            # Migrate UserProgress for this chapter
+            db.query(UserProgress).filter(
+                UserProgress.chapter_id == chap.id
+            ).update({UserProgress.chapter_id: master_chapter.id}, synchronize_session=False)
+            
+            # Delete secondary chapter
+            db.delete(chap)
+            
+        # Re-index sequence_order for remaining chapters of the course
+        remaining_chapters = db.query(Chapter).filter(
+            Chapter.course_id == course_id
+        ).order_by(Chapter.sequence_order).all()
+        
+        for i, chap in enumerate(remaining_chapters):
+            chap.sequence_order = i + 1
+            
+        db.commit()
+        logger.info(f"Successfully merged chapters into {master_chapter.id}")
+        return {"status": "success", "detail": "Chapters merged successfully"}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error merging chapters: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error during merge: {str(e)}")
+
+
+
 

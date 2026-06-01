@@ -80,6 +80,12 @@ interface ApiService {
 
     @GET("courses/user/completed-units")
     suspend fun getCompletedUnitIds(): List<UUID>
+
+    @POST("courses/{course_id}/merge-chapters")
+    suspend fun mergeChapters(
+        @Path("course_id") courseId: UUID,
+        @Body payload: MergeChaptersRequest
+    ): GenericResponse
 }
 
 
