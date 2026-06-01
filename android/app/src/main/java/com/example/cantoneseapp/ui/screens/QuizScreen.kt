@@ -30,6 +30,8 @@ import com.example.cantoneseapp.ui.theme.LightCoral
 import com.example.cantoneseapp.ui.theme.MintGreen
 import com.example.cantoneseapp.ui.theme.SoftMint
 import com.example.cantoneseapp.ui.theme.TextDark
+import com.example.cantoneseapp.ui.theme.TextPrimary
+import com.example.cantoneseapp.ui.theme.TextSecondary
 
 @Composable
 fun QuizScreen(
@@ -585,19 +587,10 @@ fun QuizScreen(
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(vertical = 12.dp, horizontal = 16.dp),
+                                            .padding(vertical = 14.dp, horizontal = 16.dp),
                                         horizontalAlignment = Alignment.Start,
                                         verticalArrangement = Arrangement.Center
                                     ) {
-                                        if (vocabItem != null && !vocabItem.jyutping.isNullOrEmpty()) {
-                                            Text(
-                                                text = vocabItem.jyutping,
-                                                fontSize = 11.sp,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                                textAlign = TextAlign.Start
-                                            )
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                        }
                                         Text(
                                             text = option,
                                             fontSize = 16.sp,
@@ -670,9 +663,9 @@ fun QuizScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                    .background(if (isCorrectAnswer) SoftMint else LightCoral)
+                    .background(if (isCorrectAnswer) Color(0xFF0F2D1F) else Color(0xFF2C1B1B))
                     .border(
-                        width = 1.dp,
+                        width = 1.5.dp,
                         color = if (isCorrectAnswer) MintGreen else CoralRed,
                         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                     )
@@ -684,7 +677,7 @@ fun QuizScreen(
                             text = if (isCorrectAnswer) "非常好! 🎉" else "答案错误 💡",
                             fontWeight = FontWeight.Black,
                             fontSize = 20.sp,
-                            color = if (isCorrectAnswer) Color(0xFF065F46) else Color(0xFF991B1B) // Dark Green / Dark Red for readability
+                            color = if (isCorrectAnswer) MintGreen else CoralRed
                         )
                     }
                     
@@ -702,7 +695,7 @@ fun QuizScreen(
                         text = if (isCorrectAnswer) "你的翻译完全正确。" else "正确答案: $formattedCorrectAnswer",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextDark
+                        color = TextPrimary
                     )
                     
                     if (!currentQuestion.explanation.isNullOrEmpty()) {
@@ -710,7 +703,7 @@ fun QuizScreen(
                         Text(
                             text = "解析: ${currentQuestion.explanation}",
                             fontSize = 13.sp,
-                            color = TextDark.copy(alpha = 0.8f)
+                            color = TextSecondary
                         )
                     }
                     
@@ -1135,15 +1128,6 @@ fun ImageChoiceContent(
 
                                 Spacer(modifier = Modifier.height(12.dp))
 
-                                if (vocabItem != null && !vocabItem.jyutping.isNullOrEmpty()) {
-                                    Text(
-                                        text = vocabItem.jyutping,
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                }
-
                                 Text(
                                     text = option,
                                     fontSize = 15.sp,
@@ -1261,15 +1245,6 @@ fun DialogueChoiceContent(
                         horizontalAlignment = Alignment.Start,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        if (vocabItem != null && !vocabItem.jyutping.isNullOrEmpty()) {
-                            Text(
-                                text = vocabItem.jyutping,
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                textAlign = TextAlign.Start
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                        }
                         Text(
                             text = option,
                             fontSize = 16.sp,

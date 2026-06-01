@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -101,7 +103,7 @@ fun FlashcardScreen(
             trackColor = MaterialTheme.colorScheme.outline
         )
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         // Premium Obsidian Vocab Card
         Card(
@@ -117,10 +119,12 @@ fun FlashcardScreen(
                 ),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
+            val scrollState = rememberScrollState()
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(32.dp),
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = 24.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -143,7 +147,7 @@ fun FlashcardScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Cantonese character (Hanzi)
                 val characterFontSize = when {
@@ -160,7 +164,7 @@ fun FlashcardScreen(
                     letterSpacing = 4.sp
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Audio play action pill
                 IconButton(
@@ -178,11 +182,11 @@ fun FlashcardScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(36.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Mandarin translation
                 Divider(color = MaterialTheme.colorScheme.outline)
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 
                 Text(
                     "释义:",

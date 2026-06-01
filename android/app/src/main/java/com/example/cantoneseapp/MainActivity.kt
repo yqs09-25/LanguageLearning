@@ -1,5 +1,6 @@
 package com.example.cantoneseapp
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
@@ -83,6 +84,12 @@ class MainViewModel : ViewModel() {
 
     // Cover cache busters: courseId → timestamp, bumped after a cover image is updated
     var coverCacheBusters by mutableStateOf<Map<UUID, Long>>(emptyMap())
+
+    // Review State Variables
+    var isReviewMode by mutableStateOf(false)
+    var reviewModeType by mutableStateOf<String?>(null) // "vocab" or "quiz"
+    var reviewVocabList by mutableStateOf<List<Vocabulary>>(emptyList())
+    var reviewQuizQuestions by mutableStateOf<List<QuizQuestion>>(emptyList())
 
     // MediaPlayer for playing synthesized voice pronunciations
     private var mediaPlayer: MediaPlayer? = null
@@ -410,6 +417,40 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    fun startReviewSession(courseId: UUID, mode: String, context: Context) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                if (mode == "vocab") {
+                    val vocab = ApiClient.service.getReviewVocab(courseId)
+                    if (vocab.isEmpty()) {
+                        Toast.makeText(context, "📭 暂无已学单词，请先学习一门课程！", Toast.LENGTH_LONG).show()
+                    } else {
+                        reviewVocabList = vocab
+                        isReviewMode = true
+                        reviewModeType = "vocab"
+                        currentScreen = Screen.FLASHCARDS
+                    }
+                } else if (mode == "quiz") {
+                    val questions = ApiClient.service.getReviewQuizzes(courseId, limit = 10)
+                    if (questions.isEmpty()) {
+                        Toast.makeText(context, "📭 暂无已学课程测试，请先学习一门课程！", Toast.LENGTH_LONG).show()
+                    } else {
+                        reviewQuizQuestions = questions
+                        isReviewMode = true
+                        reviewModeType = "quiz"
+                        currentScreen = Screen.QUIZ
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to start review session: ${e.message}")
+                Toast.makeText(context, "获取复习内容失败，请检查网络连接。", Toast.LENGTH_SHORT).show()
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         mediaPlayer?.release()
@@ -466,6 +507,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             onUploadPdf = { file, courseId -> viewModel.uploadTextbookPdf(file, courseId) },
                             onUploadMultiplePdfs = { files, courseId -> viewModel.uploadSequentialImages(files, courseId) },
                             onRefresh = { viewModel.fetchInitialData() },
+                            onStartReview = { courseId, mode -> viewModel.startReviewSession(courseId, mode, context) },
                             onSubmitBugReport = { desc, uri, onComplete ->
                                 val filePart = uri?.let { u ->
                                     try {
@@ -506,28 +548,103 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             }
                         )
                     }
-                    Screen.FLASHCARDS -> FlashcardScreen(
-                        unit = viewModel.activeUnit,
-                        onPlayAudio = { viewModel.playSound(it) },
-                        onPlayExampleAudio = { viewModel.playTts(it) },
-                        onUnitComplete = {
-                            viewModel.completeActiveUnit()
-                            viewModel.currentScreen = Screen.PATH
-                        },
-                        onStartQuiz = { viewModel.currentScreen = Screen.QUIZ }
-                    )
-                    Screen.QUIZ -> QuizScreen(
-                        unit = viewModel.activeUnit,
-                        onPlayAudio = { viewModel.playSound(it) },
-                        onPlayTts = { viewModel.playTts(it) },
-                        onQuizComplete = { isPerfect ->
-                            if (isPerfect) {
-                                viewModel.completeActiveUnit()
+                    Screen.FLASHCARDS -> {
+                        val finalUnit = if (viewModel.isReviewMode) {
+                            remember(viewModel.reviewVocabList) {
+                                UnitDetail(
+                                    id = UUID.randomUUID(),
+                                    lessonId = UUID.randomUUID(),
+                                    title = "智能单词复习",
+                                    sequenceOrder = 1,
+                                    vocabulary = viewModel.reviewVocabList,
+                                    quizzes = emptyList()
+                                )
                             }
-                            viewModel.currentScreen = Screen.PATH
-                        },
-                        onExitQuiz = { viewModel.currentScreen = Screen.PATH }
-                    )
+                        } else {
+                            viewModel.activeUnit
+                        }
+
+                        FlashcardScreen(
+                            unit = finalUnit,
+                            onPlayAudio = { viewModel.playSound(it) },
+                            onPlayExampleAudio = { viewModel.playTts(it) },
+                            onUnitComplete = {
+                                if (viewModel.isReviewMode) {
+                                    viewModel.isReviewMode = false
+                                    viewModel.reviewVocabList = emptyList()
+                                } else {
+                                    viewModel.completeActiveUnit()
+                                }
+                                viewModel.currentScreen = Screen.PATH
+                            },
+                            onStartQuiz = {
+                                if (viewModel.isReviewMode) {
+                                    viewModel.viewModelScope.launch {
+                                        viewModel.isLoading = true
+                                        try {
+                                            val questions = ApiClient.service.getReviewQuizzes(viewModel.currentCourseDetail?.id ?: UUID.randomUUID(), limit = 10)
+                                            viewModel.reviewQuizQuestions = questions
+                                            viewModel.reviewModeType = "quiz"
+                                            viewModel.currentScreen = Screen.QUIZ
+                                        } catch (e: Exception) {
+                                            Log.e("MainActivity", "Failed to fetch review quizzes: ${e.message}")
+                                        } finally {
+                                            viewModel.isLoading = false
+                                        }
+                                    }
+                                } else {
+                                    viewModel.currentScreen = Screen.QUIZ
+                                }
+                            }
+                        )
+                    }
+                    Screen.QUIZ -> {
+                        val finalUnit = if (viewModel.isReviewMode) {
+                            remember(viewModel.reviewQuizQuestions) {
+                                val mockQuiz = Quiz(
+                                    id = UUID.randomUUID(),
+                                    title = "综合挑战复习",
+                                    xpReward = 15,
+                                    questions = viewModel.reviewQuizQuestions
+                                )
+                                UnitDetail(
+                                    id = UUID.randomUUID(),
+                                    lessonId = UUID.randomUUID(),
+                                    title = "智能挑战复习",
+                                    sequenceOrder = 1,
+                                    vocabulary = emptyList(),
+                                    quizzes = listOf(mockQuiz)
+                                )
+                            }
+                        } else {
+                            viewModel.activeUnit
+                        }
+
+                        QuizScreen(
+                            unit = finalUnit,
+                            onPlayAudio = { viewModel.playSound(it) },
+                            onPlayTts = { viewModel.playTts(it) },
+                            onQuizComplete = { isPerfect ->
+                                if (viewModel.isReviewMode) {
+                                    viewModel.isReviewMode = false
+                                    viewModel.reviewQuizQuestions = emptyList()
+                                    viewModel.fetchInitialData() // refresh user stats for new XP
+                                } else {
+                                    if (isPerfect) {
+                                        viewModel.completeActiveUnit()
+                                    }
+                                }
+                                viewModel.currentScreen = Screen.PATH
+                            },
+                            onExitQuiz = {
+                                if (viewModel.isReviewMode) {
+                                    viewModel.isReviewMode = false
+                                    viewModel.reviewQuizQuestions = emptyList()
+                                }
+                                viewModel.currentScreen = Screen.PATH
+                            }
+                        )
+                    }
                 }
             }
         }

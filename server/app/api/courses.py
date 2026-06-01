@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 from app.database import get_db
 from app.core.tts import synthesize_cantonese_text
-from app.models import Course, Lesson, Unit, UserStats, UserProgress, Chapter, BugReport, Quiz
+from app.models import Course, Lesson, Unit, UserStats, UserProgress, Chapter, BugReport, Quiz, Vocabulary, QuizQuestion
 from app.schemas.schemas import (
     CourseBase, 
     CourseDetail, 
@@ -21,7 +21,9 @@ from app.schemas.schemas import (
     LessonCompletionResponse,
     BugReportCreate,
     BugReportResponse,
-    EnrolledCourseResponse
+    EnrolledCourseResponse,
+    VocabularyBase,
+    QuizQuestionBase
 )
 
 router = APIRouter(prefix="/courses", tags=["Courses & Learning Path"])
@@ -507,6 +509,60 @@ async def update_course_metadata(
         db.rollback()
         logger.error(f"Failed to commit course metadata update: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.get("/{course_id}/review/vocab", response_model=List[VocabularyBase])
+def get_review_vocab(course_id: uuid.UUID, db: Session = Depends(get_db)):
+    """
+    Get all vocabulary items from completed units in the specified course.
+    """
+    # Find all completed unit IDs for this user
+    completed_units = db.query(UserProgress.unit_id).filter(
+        UserProgress.user_id == DEFAULT_USER_ID,
+        UserProgress.is_completed == True
+    ).all()
+    completed_unit_ids = [r[0] for r in completed_units]
+
+    if not completed_unit_ids:
+        return []
+
+    # Get all units matching these IDs that belong to the specified course
+    vocab_items = db.query(Vocabulary).join(Unit).join(Lesson).join(Chapter).filter(
+        Chapter.course_id == course_id,
+        Unit.id.in_(completed_unit_ids)
+    ).all()
+    
+    return vocab_items
+
+
+@router.get("/{course_id}/review/quizzes", response_model=List[QuizQuestionBase])
+def get_review_quizzes(course_id: uuid.UUID, limit: int = 10, db: Session = Depends(get_db)):
+    """
+    Get a randomized selection of quiz questions from completed units in the specified course.
+    """
+    # Find completed unit IDs
+    completed_units = db.query(UserProgress.unit_id).filter(
+        UserProgress.user_id == DEFAULT_USER_ID,
+        UserProgress.is_completed == True
+    ).all()
+    completed_unit_ids = [r[0] for r in completed_units]
+
+    if not completed_unit_ids:
+        return []
+
+    # Query all quiz questions belonging to completed units of this course
+    questions = db.query(QuizQuestion).join(Quiz).join(Unit).join(Lesson).join(Chapter).filter(
+        Chapter.course_id == course_id,
+        Unit.id.in_(completed_unit_ids)
+    ).all()
+
+    import random
+    if not questions:
+        return []
+    
+    # Shuffle and limit
+    selected_questions = random.sample(questions, min(len(questions), limit))
+    return selected_questions
 
 
 

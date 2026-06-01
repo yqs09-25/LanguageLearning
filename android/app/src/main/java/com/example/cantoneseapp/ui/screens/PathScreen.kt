@@ -66,6 +66,7 @@ fun PathScreen(
     onUploadPdf: (File, UUID?) -> Unit,
     onUploadMultiplePdfs: (List<File>, UUID?) -> Unit,
     onRefresh: () -> Unit,
+    onStartReview: (UUID, String) -> Unit = { _, _ -> },
     onSubmitBugReport: (String, Uri?, (String) -> Unit) -> Unit,
     onMergeChapters: (UUID, List<UUID>, (Boolean) -> Unit) -> Unit = { _, _, _ -> },
     onUpdateCourseMetadata: (UUID, String?, String?, String?, String?, Uri?, (Boolean) -> Unit) -> Unit = { _, _, _, _, _, _, _ -> }
@@ -265,44 +266,46 @@ fun PathScreen(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Streak badge
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(end = 12.dp)
-                ) {
-                    Icon(
-                        Icons.Default.LocalFireDepartment,
-                        contentDescription = "Streak",
-                        tint = GlowGold,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                        text = "${userStats?.currentStreak ?: 0}",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 14.sp,
-                        color = GlowGold
-                    )
-                }
+                if (!isDetailMode) {
+                    // Streak badge
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 12.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.LocalFireDepartment,
+                            contentDescription = "Streak",
+                            tint = GlowGold,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "${userStats?.currentStreak ?: 0}",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp,
+                            color = GlowGold
+                        )
+                    }
 
-                // XP badge
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(end = 12.dp)
-                ) {
-                    Icon(
-                        Icons.Default.EmojiEvents,
-                        contentDescription = "Crowns",
-                        tint = GlowGold,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                        text = "${userStats?.totalXp ?: 0} XP",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 14.sp,
-                        color = TextPrimary
-                    )
+                    // XP badge
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 12.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.EmojiEvents,
+                            contentDescription = "Crowns",
+                            tint = GlowGold,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "${userStats?.totalXp ?: 0} XP",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp,
+                            color = TextPrimary
+                        )
+                    }
                 }
 
                 if (isDetailMode) {
@@ -374,6 +377,18 @@ fun PathScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // Smart Review Dashboard ( Duolingo gamification HUD )
+                if (enrolledCourses.isNotEmpty()) {
+                    item {
+                        val activeCourseId = enrolledCourses.first().id
+                        SmartReviewDashboardCard(
+                            completedUnitIdsCount = completedUnitIds.size,
+                            onStartVocabReview = { onStartReview(activeCourseId, "vocab") },
+                            onStartQuizReview = { onStartReview(activeCourseId, "quiz") }
+                        )
+                    }
+                }
+
                 item {
                     Text(
                         text = "我的教材书本架 (Textbooks)",
@@ -2410,4 +2425,139 @@ fun CourseMetadataEditDialog(
         shape = RoundedCornerShape(16.dp),
         containerColor = CardObsidian
     )
+}
+
+// -------------------------------------------------------------
+// Smart Review Dashboard Composable
+// -------------------------------------------------------------
+@Composable
+fun SmartReviewDashboardCard(
+    completedUnitIdsCount: Int,
+    onStartVocabReview: () -> Unit,
+    onStartQuizReview: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(4.dp, RoundedCornerShape(16.dp))
+            .border(
+                width = 1.dp,
+                color = if (completedUnitIdsCount > 0) MintGreen.copy(alpha = 0.3f) else DividerObsidian,
+                shape = RoundedCornerShape(16.dp)
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = CardObsidian
+        ),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            if (completedUnitIdsCount > 0) MintGreen.copy(alpha = 0.08f) else Color.Transparent,
+                            if (completedUnitIdsCount > 0) RoyalPurple.copy(alpha = 0.04f) else Color.Transparent
+                        )
+                    )
+                )
+                .padding(18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (completedUnitIdsCount > 0) MintGreen.copy(alpha = 0.15f) else DividerObsidian
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (completedUnitIdsCount > 0) Icons.Default.Star else Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = if (completedUnitIdsCount > 0) GlowGold else TextSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "智能复习房",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = if (completedUnitIdsCount > 0) {
+                            "已掌握 $completedUnitIdsCount 个单元词汇！今天温故知新吧 ⚡"
+                        } else {
+                            "学完任意单元后即可解锁智能复习！"
+                        },
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                }
+            }
+
+            if (completedUnitIdsCount > 0) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = onStartVocabReview,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MintGreen
+                        ),
+                        contentPadding = PaddingValues(vertical = 10.dp),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ImportContacts,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "闪卡速记",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Button(
+                        onClick = onStartQuizReview,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF3B82F6) // Premium blue
+                        ),
+                        contentPadding = PaddingValues(vertical = 10.dp),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FlashOn,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "智能挑战",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

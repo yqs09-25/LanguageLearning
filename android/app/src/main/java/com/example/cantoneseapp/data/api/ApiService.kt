@@ -97,6 +97,17 @@ interface ApiService {
         @Part("target_lang") targetLang: okhttp3.RequestBody? = null,
         @Part cover: MultipartBody.Part? = null
     ): GenericResponse
+
+    @GET("courses/{course_id}/review/vocab")
+    suspend fun getReviewVocab(
+        @Path("course_id") courseId: UUID
+    ): List<Vocabulary>
+
+    @GET("courses/{course_id}/review/quizzes")
+    suspend fun getReviewQuizzes(
+        @Path("course_id") courseId: UUID,
+        @Query("limit") limit: Int = 10
+    ): List<QuizQuestion>
 }
 
 
