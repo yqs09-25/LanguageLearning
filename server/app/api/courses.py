@@ -514,54 +514,128 @@ async def update_course_metadata(
 @router.get("/{course_id}/review/vocab", response_model=List[VocabularyBase])
 def get_review_vocab(course_id: uuid.UUID, db: Session = Depends(get_db)):
     """
-    Get all vocabulary items from completed units in the specified course.
+    Get vocabulary items from completed units in the specified course, sorted by Ebbinghaus memory priority.
     """
-    # Find all completed unit IDs for this user
-    completed_units = db.query(UserProgress.unit_id).filter(
+    # 1. Fetch completed unit progress entries for this course
+    progress_entries = db.query(UserProgress).join(Unit).join(Lesson).join(Chapter).filter(
+        Chapter.course_id == course_id,
         UserProgress.user_id == DEFAULT_USER_ID,
         UserProgress.is_completed == True
     ).all()
-    completed_unit_ids = [r[0] for r in completed_units]
 
-    if not completed_unit_ids:
+    if not progress_entries:
         return []
 
-    # Get all units matching these IDs that belong to the specified course
+    # 2. Calculate Ebbinghaus memory priority score for each unit
+    # Formula: Priority = Minutes Elapsed * (101 - high_score)
+    now_naive = datetime.utcnow()
+    scored_entries = []
+    for entry in progress_entries:
+        last_accessed = entry.last_accessed
+        if last_accessed is None:
+            minutes_elapsed = 999999.0
+        else:
+            # Strip timezone offset to avoid naive vs aware datetime mismatch
+            if last_accessed.tzinfo is not None:
+                last_accessed = last_accessed.replace(tzinfo=None)
+            time_diff = now_naive - last_accessed
+            minutes_elapsed = max(0.0, time_diff.total_seconds() / 60.0)
+        
+        high_score = entry.high_score if entry.high_score is not None else 0
+        priority_score = minutes_elapsed * (101 - high_score)
+        scored_entries.append((entry, priority_score))
+
+    # Sort descending by priority score (highest priority = most forgotten first)
+    scored_entries.sort(key=lambda x: x[1], reverse=True)
+    unit_priority_map = {item[0].unit_id: item[1] for item in scored_entries}
+
+    # 3. Get vocab items matching these completed units
     vocab_items = db.query(Vocabulary).join(Unit).join(Lesson).join(Chapter).filter(
         Chapter.course_id == course_id,
-        Unit.id.in_(completed_unit_ids)
+        Unit.id.in_(list(unit_priority_map.keys()))
     ).all()
+
+    # Sort the items in-memory based on unit priority
+    vocab_items.sort(key=lambda v: unit_priority_map.get(v.unit_id, 0.0), reverse=True)
+
+    # 4. Mark these units as accessed now to update memory curve for subsequent sessions
+    for entry, _ in scored_entries:
+        entry.last_accessed = func.now()
     
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to update last_accessed for review vocab: {e}")
+
     return vocab_items
 
 
 @router.get("/{course_id}/review/quizzes", response_model=List[QuizQuestionBase])
 def get_review_quizzes(course_id: uuid.UUID, limit: int = 10, db: Session = Depends(get_db)):
     """
-    Get a randomized selection of quiz questions from completed units in the specified course.
+    Get a selection of quiz questions from completed units in the specified course, sorted by Ebbinghaus memory priority.
     """
-    # Find completed unit IDs
-    completed_units = db.query(UserProgress.unit_id).filter(
+    # 1. Fetch completed unit progress entries for this course
+    progress_entries = db.query(UserProgress).join(Unit).join(Lesson).join(Chapter).filter(
+        Chapter.course_id == course_id,
         UserProgress.user_id == DEFAULT_USER_ID,
         UserProgress.is_completed == True
     ).all()
-    completed_unit_ids = [r[0] for r in completed_units]
 
-    if not completed_unit_ids:
+    if not progress_entries:
         return []
 
-    # Query all quiz questions belonging to completed units of this course
+    # 2. Calculate Ebbinghaus memory priority score for each unit
+    # Formula: Priority = Minutes Elapsed * (101 - high_score)
+    now_naive = datetime.utcnow()
+    scored_entries = []
+    for entry in progress_entries:
+        last_accessed = entry.last_accessed
+        if last_accessed is None:
+            minutes_elapsed = 999999.0
+        else:
+            # Strip timezone offset to avoid naive vs aware datetime mismatch
+            if last_accessed.tzinfo is not None:
+                last_accessed = last_accessed.replace(tzinfo=None)
+            time_diff = now_naive - last_accessed
+            minutes_elapsed = max(0.0, time_diff.total_seconds() / 60.0)
+        
+        high_score = entry.high_score if entry.high_score is not None else 0
+        priority_score = minutes_elapsed * (101 - high_score)
+        scored_entries.append((entry, priority_score))
+
+    # Sort descending by priority score (highest priority = most forgotten first)
+    scored_entries.sort(key=lambda x: x[1], reverse=True)
+    unit_priority_map = {item[0].unit_id: item[1] for item in scored_entries}
+
+    # 3. Query all quiz questions belonging to completed units of this course
     questions = db.query(QuizQuestion).join(Quiz).join(Unit).join(Lesson).join(Chapter).filter(
         Chapter.course_id == course_id,
-        Unit.id.in_(completed_unit_ids)
+        Unit.id.in_(list(unit_priority_map.keys()))
     ).all()
 
-    import random
     if not questions:
         return []
-    
-    # Shuffle and limit
-    selected_questions = random.sample(questions, min(len(questions), limit))
+
+    # Sort questions by unit priority score descending
+    questions.sort(key=lambda q: unit_priority_map.get(q.quiz.unit_id, 0.0), reverse=True)
+
+    # Take the top `limit` questions
+    selected_questions = questions[:limit]
+
+    # 4. Mark ONLY the selected units as accessed now to update their memory curve
+    selected_unit_ids = {q.quiz.unit_id for q in selected_questions}
+    for entry, _ in scored_entries:
+        if entry.unit_id in selected_unit_ids:
+            entry.last_accessed = func.now()
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to update last_accessed for review quizzes: {e}")
+
     return selected_questions
 
 
