@@ -4,7 +4,7 @@ from datetime import datetime, date
 import os
 
 logger = logging.getLogger("courses_router")
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Body
 from app.config import settings
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -637,6 +637,243 @@ def get_review_quizzes(course_id: uuid.UUID, limit: int = 10, db: Session = Depe
         logger.error(f"Failed to update last_accessed for review quizzes: {e}")
 
     return selected_questions
+
+
+@router.get("/{course_id}/export")
+def export_course(course_id: uuid.UUID, db: Session = Depends(get_db)):
+    """
+    Export all course content (chapters, lessons, units, vocabulary, quizzes, and questions)
+    as a self-contained JSON structure.
+    """
+    import base64
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    # Read cover image if exists and encode as base64
+    cover_b64 = None
+    cover_path = os.path.join(settings.UPLOAD_DIR, "covers", f"{course_id}.png")
+    if os.path.exists(cover_path):
+        try:
+            with open(cover_path, "rb") as f:
+                cover_b64 = base64.b64encode(f.read()).decode("utf-8")
+        except Exception as e:
+            logger.error(f"Failed to read cover image for export: {e}")
+
+    chapters_data = []
+    for chap in course.chapters:
+        lessons_data = []
+        for les in chap.lessons:
+            units_data = []
+            for ut in les.units:
+                # Vocab
+                vocab_data = []
+                for v in ut.vocabulary:
+                    vocab_data.append({
+                        "character": v.character,
+                        "jyutping": v.jyutping,
+                        "pinyin": v.pinyin,
+                        "definition_mandarin": v.definition_mandarin,
+                        "usage_example_cantonese": v.usage_example_cantonese,
+                        "usage_example_cantonese_chips": v.usage_example_cantonese_chips,
+                        "usage_example_mandarin": v.usage_example_mandarin
+                    })
+                
+                # Quizzes
+                quizzes_data = []
+                for q in ut.quizzes:
+                    questions_data = []
+                    for qn in q.questions:
+                        questions_data.append({
+                            "type": qn.type,
+                            "prompt": qn.prompt,
+                            "options": qn.options,
+                            "correct_answer": qn.correct_answer,
+                            "correct_answer_list": qn.correct_answer_list,
+                            "explanation": qn.explanation
+                        })
+                    quizzes_data.append({
+                        "title": q.title,
+                        "xp_reward": q.xp_reward,
+                        "questions": questions_data
+                    })
+
+                units_data.append({
+                    "title": ut.title,
+                    "sequence_order": ut.sequence_order,
+                    "vocabulary": vocab_data,
+                    "quizzes": quizzes_data
+                })
+
+            lessons_data.append({
+                "title": les.title,
+                "sequence_order": les.sequence_order,
+                "grammar_notes": les.grammar_notes,
+                "units": units_data
+            })
+
+        chapters_data.append({
+            "title": chap.title,
+            "sequence_order": chap.sequence_order,
+            "description": chap.description,
+            "lessons": lessons_data
+        })
+
+    course_data = {
+        "version": "1.0",
+        "name": course.name,
+        "description": course.description,
+        "source_lang": course.source_lang,
+        "target_lang": course.target_lang,
+        "cover_image_b64": cover_b64,
+        "chapters": chapters_data
+    }
+
+    return course_data
+
+
+@router.post("/import")
+def import_course(data: dict = Body(...), db: Session = Depends(get_db)):
+    """
+    Import a course from a JSON structure. Creates course, chapters, lessons, units,
+    vocabulary, quizzes, and questions, maintaining all sequences.
+    """
+    import base64
+    from app.models import Course, Chapter, Lesson, Unit, Vocabulary, Quiz, QuizQuestion
+    try:
+        course_name = data.get("name", "Untitled Imported Course")
+        course_desc = data.get("description", "")
+        source_lang = data.get("source_lang", "Mandarin (Simplified)")
+        target_lang = data.get("target_lang", "Cantonese")
+        
+        # 1. Create course
+        new_course = Course(
+            name=course_name,
+            description=course_desc,
+            source_lang=source_lang,
+            target_lang=target_lang
+        )
+        db.add(new_course)
+        db.commit()
+        db.refresh(new_course)
+        course_id = new_course.id
+
+        # 2. Process cover image if provided
+        cover_b64 = data.get("cover_image_b64")
+        if cover_b64:
+            try:
+                covers_dir = os.path.join(settings.UPLOAD_DIR, "covers")
+                os.makedirs(covers_dir, exist_ok=True)
+                cover_path = os.path.join(covers_dir, f"{course_id}.png")
+                cover_data = base64.b64decode(cover_b64)
+                
+                # Convert to PNG using PIL to ensure format
+                from PIL import Image as PILImage
+                import io
+                img = PILImage.open(io.BytesIO(cover_data)).convert("RGB")
+                img.save(cover_path, "PNG")
+            except Exception as e:
+                logger.error(f"Failed to save imported cover image: {e}")
+
+        # 3. Import Chapters
+        chapters_list = data.get("chapters", [])
+        for chap_data in chapters_list:
+            chap = Chapter(
+                course_id=course_id,
+                title=chap_data.get("title", "Untitled Chapter"),
+                sequence_order=chap_data.get("sequence_order", 1),
+                description=chap_data.get("description", "")
+            )
+            db.add(chap)
+            db.commit()
+            db.refresh(chap)
+
+            # Lessons
+            lessons_list = chap_data.get("lessons", [])
+            for les_data in lessons_list:
+                les = Lesson(
+                    chapter_id=chap.id,
+                    title=les_data.get("title", "Untitled Lesson"),
+                    sequence_order=les_data.get("sequence_order", 1),
+                    grammar_notes=les_data.get("grammar_notes", "")
+                )
+                db.add(les)
+                db.commit()
+                db.refresh(les)
+
+                # Units
+                units_list = les_data.get("units", [])
+                for ut_data in units_list:
+                    ut = Unit(
+                        lesson_id=les.id,
+                        title=ut_data.get("title", "Untitled Unit"),
+                        sequence_order=ut_data.get("sequence_order", 1)
+                    )
+                    db.add(ut)
+                    db.commit()
+                    db.refresh(ut)
+
+                    # Vocabulary
+                    vocab_list = ut_data.get("vocabulary", [])
+                    for v_data in vocab_list:
+                        vocab = Vocabulary(
+                            unit_id=ut.id,
+                            character=v_data.get("character", ""),
+                            jyutping=v_data.get("jyutping", ""),
+                            pinyin=v_data.get("pinyin", ""),
+                            definition_mandarin=v_data.get("definition_mandarin", ""),
+                            usage_example_cantonese=v_data.get("usage_example_cantonese", ""),
+                            usage_example_cantonese_chips=v_data.get("usage_example_cantonese_chips", []),
+                            usage_example_mandarin=v_data.get("usage_example_mandarin", ""),
+                        )
+                        # Generate TTS dynamically to populate audio_url
+                        try:
+                            audio_url = synthesize_cantonese_text(vocab.character)
+                            vocab.audio_url = audio_url
+                        except Exception as tts_err:
+                            logger.error(f"TTS synthesis failed for imported word {vocab.character}: {tts_err}")
+                        db.add(vocab)
+
+                    # Quizzes
+                    quizzes_list = ut_data.get("quizzes", [])
+                    for q_data in quizzes_list:
+                        q = Quiz(
+                            unit_id=ut.id,
+                            title=q_data.get("title", "Untitled Quiz"),
+                            xp_reward=q_data.get("xp_reward", 10)
+                        )
+                        db.add(q)
+                        db.commit()
+                        db.refresh(q)
+
+                        # Questions
+                        questions_list = q_data.get("questions", [])
+                        for qn_data in questions_list:
+                            qn = QuizQuestion(
+                                quiz_id=q.id,
+                                type=qn_data.get("type", "multiple_choice"),
+                                prompt=qn_data.get("prompt", ""),
+                                options=qn_data.get("options", {}),
+                                correct_answer=qn_data.get("correct_answer", ""),
+                                correct_answer_list=qn_data.get("correct_answer_list", []),
+                                explanation=qn_data.get("explanation", "")
+                            )
+                            # If listening, synthesize prompt audio
+                            if qn.type in ["listening", "listening_sentence_builder"] and qn.prompt:
+                                try:
+                                    prompt_audio_url = synthesize_cantonese_text(qn.prompt)
+                                    qn.prompt_audio_url = prompt_audio_url
+                                except Exception as tts_err:
+                                    logger.error(f"TTS synthesis failed for imported quiz question: {tts_err}")
+                            db.add(qn)
+
+        db.commit()
+        return {"status": "success", "detail": "Course imported successfully", "course_id": str(course_id)}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to import course: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to import course: {str(e)}")
+
 
 
 
